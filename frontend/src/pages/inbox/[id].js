@@ -20,6 +20,7 @@ export default function ChatDetail() {
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const fileInputRef = useRef(null);
 
   const conv = useSWR(id ? `/api/inbox/conversations` : null, fetcher, { refreshInterval: 0 });
@@ -166,89 +167,170 @@ export default function ChatDetail() {
       <div className="max-w-7xl mx-auto h-[calc(100vh-57px)] flex">
         <div className="flex-1 min-w-0 flex flex-col">
         {/* Header */}
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
-          <div className="min-w-0">
-            <button
-              onClick={() => router.push('/inbox')}
-              className="text-xs text-slate-500 hover:text-slate-700 mb-1"
-            >
-              ← Kembali ke inbox
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-800">
-                {convData ? formatPhone(convData.phone) : id}
-              </span>
-              {convData?.phone?.endsWith?.('@lid') && (
-                <span className="text-xs text-slate-400" title={convData.phone}>
-                  (LID — nomor asli tidak terdeteksi)
+        <div className="bg-white border-b border-slate-200 px-3 sm:px-6 py-3">
+          <div className="flex items-start gap-2 justify-between">
+            {/* Left: identity */}
+            <div className="min-w-0 flex-1">
+              <button
+                onClick={() => router.push('/inbox')}
+                className="text-xs text-slate-500 hover:text-slate-700 mb-1 -ml-1 px-1 py-0.5 rounded hover:bg-slate-50"
+                aria-label="Kembali ke inbox"
+              >
+                ← Kembali
+              </button>
+              <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+                <span className="font-semibold text-slate-800 text-sm sm:text-base">
+                  {convData ? formatPhone(convData.phone) : id}
                 </span>
-              )}
-              {status && <span className={`status-pill ${status.cls}`}>{status.label}</span>}
-              {convData?.last_intent && (
-                <span className="text-xs text-slate-400">· {convData.last_intent}</span>
-              )}
+                {status && <span className={`status-pill ${status.cls}`}>{status.label}</span>}
+                {convData?.phone?.endsWith?.('@lid') && (
+                  <span className="text-[10px] text-slate-400" title={convData.phone}>LID</span>
+                )}
+                {convData?.last_intent && (
+                  <span className="text-[10px] text-slate-400 hidden sm:inline">· {convData.last_intent}</span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                {convData?.customer_id ? `#${convData.customer_id}` : 'belum terhubung'}
+                {convData?.last_message_at && ` · ${formatRelative(convData.last_message_at)}`}
+              </div>
             </div>
-            <div className="text-xs text-slate-400">
-              {convData?.customer_id ? `Customer #${convData.customer_id}` : 'Belum terhubung ke akun'}
-              {convData?.assigned_staff_id && ` · assigned ${convData.assigned_staff_id}`}
-              {convData?.last_message_at && ` · ${formatRelative(convData.last_message_at)}`}
+
+            {/* Right: actions */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* PRIMARY action — always visible */}
+              {isPaused ? (
+                <button
+                  onClick={() => callAction('/resume-ai', 'Resume AI')}
+                  className="text-xs sm:text-sm px-3 py-2 rounded-md bg-brand-500 text-white hover:bg-brand-600 whitespace-nowrap font-medium"
+                >
+                  Resume AI
+                </button>
+              ) : (
+                <button
+                  onClick={() => callAction('/takeover', 'Takeover')}
+                  className="text-xs sm:text-sm px-3 py-2 rounded-md bg-amber-500 text-white hover:bg-amber-600 whitespace-nowrap font-medium"
+                >
+                  Takeover
+                </button>
+              )}
+
+              {/* Desktop: all secondary actions inline */}
+              <div className="hidden sm:flex items-center gap-2">
+                <button
+                  onClick={summarizeChat}
+                  disabled={summaryLoading}
+                  className="text-xs px-3 py-2 rounded-md text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 disabled:opacity-50 whitespace-nowrap"
+                  title="Ringkasan AI"
+                >
+                  {summaryLoading ? '…' : '📋 Summary'}
+                </button>
+                <a
+                  href={`/api/inbox/conversations/${id}/export.csv`}
+                  className="text-xs px-3 py-2 rounded-md text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 whitespace-nowrap"
+                  title="Download transcript (CSV)"
+                  download
+                >
+                  ⬇ CSV
+                </a>
+                <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer px-2 py-2 rounded hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={!!convData?.shadow_mode}
+                    onChange={(e) => setShadow(e.target.checked)}
+                    className="cursor-pointer"
+                  />
+                  Shadow
+                </label>
+                {convData?.status === 'closed' ? (
+                  <button
+                    onClick={() => callAction('/reopen', 'Reopen')}
+                    className="text-xs px-3 py-2 rounded-md text-emerald-700 hover:bg-emerald-50 border border-emerald-200 whitespace-nowrap"
+                  >
+                    Reopen
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => callAction('/close', 'Tutup')}
+                    className="text-xs px-3 py-2 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 whitespace-nowrap"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+
+              {/* Mobile: overflow menu */}
+              <div className="relative sm:hidden">
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((v) => !v)}
+                  aria-label="Aksi lainnya"
+                  aria-expanded={moreOpen}
+                  className="w-10 h-10 inline-flex items-center justify-center rounded-md text-slate-600 border border-slate-200 bg-white hover:bg-slate-50"
+                >
+                  <span className="text-lg leading-none">⋯</span>
+                </button>
+                {moreOpen && (
+                  <>
+                    {/* Backdrop catches outside taps */}
+                    <button
+                      type="button"
+                      aria-label="Tutup menu"
+                      onClick={() => setMoreOpen(false)}
+                      className="fixed inset-0 z-40 bg-transparent cursor-default"
+                    />
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-12 z-50 w-56 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden"
+                    >
+                      <button
+                        role="menuitem"
+                        onClick={() => { setMoreOpen(false); summarizeChat(); }}
+                        disabled={summaryLoading}
+                        className="w-full text-left px-4 py-3 text-sm text-purple-700 hover:bg-purple-50 disabled:opacity-50"
+                      >
+                        {summaryLoading ? '… Generating' : '📋 Summary AI'}
+                      </button>
+                      <a
+                        role="menuitem"
+                        href={`/api/inbox/conversations/${id}/export.csv`}
+                        download
+                        onClick={() => setMoreOpen(false)}
+                        className="block px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 border-t border-slate-100"
+                      >
+                        ⬇ Download CSV
+                      </a>
+                      <label className="flex items-center justify-between px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 border-t border-slate-100 cursor-pointer">
+                        <span>Shadow mode</span>
+                        <input
+                          type="checkbox"
+                          checked={!!convData?.shadow_mode}
+                          onChange={(e) => setShadow(e.target.checked)}
+                          className="cursor-pointer w-5 h-5"
+                        />
+                      </label>
+                      {convData?.status === 'closed' ? (
+                        <button
+                          role="menuitem"
+                          onClick={() => { setMoreOpen(false); callAction('/reopen', 'Reopen'); }}
+                          className="w-full text-left px-4 py-3 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-100"
+                        >
+                          Reopen conversation
+                        </button>
+                      ) : (
+                        <button
+                          role="menuitem"
+                          onClick={() => { setMoreOpen(false); callAction('/close', 'Tutup'); }}
+                          className="w-full text-left px-4 py-3 text-sm text-rose-600 hover:bg-rose-50 border-t border-slate-100"
+                        >
+                          Close conversation
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <a
-              href={`/api/inbox/conversations/${id}/export.csv`}
-              className="text-xs px-3 py-1.5 rounded-md text-slate-600 border border-slate-200 bg-white hover:bg-slate-50"
-              title="Download transcript (CSV)"
-              download
-            >
-              ⬇ CSV
-            </a>
-            <button
-              onClick={summarizeChat}
-              disabled={summaryLoading}
-              className="text-xs px-3 py-1.5 rounded-md text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 disabled:opacity-50"
-              title="Ringkasan AI"
-            >
-              {summaryLoading ? '…' : '📋 Summary'}
-            </button>
-            {isPaused ? (
-              <button
-                onClick={() => callAction('/resume-ai', 'Resume AI')}
-                className="text-sm px-3 py-1.5 rounded-md bg-brand-500 text-white hover:bg-brand-600"
-              >
-                Resume AI
-              </button>
-            ) : (
-              <button
-                onClick={() => callAction('/takeover', 'Takeover')}
-                className="text-sm px-3 py-1.5 rounded-md bg-amber-500 text-white hover:bg-amber-600"
-              >
-                Takeover
-              </button>
-            )}
-            <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!convData?.shadow_mode}
-                onChange={(e) => setShadow(e.target.checked)}
-              />
-              Shadow
-            </label>
-            {convData?.status === 'closed' ? (
-              <button
-                onClick={() => callAction('/reopen', 'Reopen')}
-                className="text-xs px-3 py-1.5 rounded-md text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border border-emerald-200"
-              >
-                Reopen
-              </button>
-            ) : (
-              <button
-                onClick={() => callAction('/close', 'Tutup')}
-                className="text-xs px-3 py-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50"
-              >
-                Close
-              </button>
-            )}
           </div>
         </div>
 
@@ -291,9 +373,18 @@ export default function ChatDetail() {
         {/* Composer */}
         <form
           onSubmit={sendReply}
-          className="bg-white border-t border-slate-200 px-4 py-3"
+          className="bg-white border-t border-slate-200 px-3 sm:px-4 py-3"
         >
-          <div className="flex items-end gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
+            className="hidden"
+            onChange={handleFilePick}
+          />
+
+          {/* Mobile-first: stacked rows. sm+: textarea + vertical action stack on right */}
+          <div className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3">
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -303,23 +394,47 @@ export default function ChatDetail() {
                   sendReply();
                 }
               }}
-              placeholder="Ketik balasan operator… (Ctrl/⌘+Enter untuk kirim)"
+              placeholder="Ketik balasan operator…"
               rows={2}
-              className="flex-1 resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+              className="flex-1 resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500 min-h-[60px]"
             />
-            <div className="flex flex-col gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
-                className="hidden"
-                onChange={handleFilePick}
-              />
+
+            {/* Mobile: 3 icon-buttons in a row + send full width */}
+            <div className="flex sm:hidden items-center gap-2">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="text-xs px-3 py-1.5 rounded-md text-slate-700 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap"
+                aria-label="Kirim file atau foto"
+                className="w-11 h-11 inline-flex items-center justify-center rounded-md text-slate-700 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+              >
+                {uploading ? <span className="text-xs">…</span> : <span aria-hidden>📎</span>}
+              </button>
+              <button
+                type="button"
+                onClick={suggestReply}
+                disabled={suggesting}
+                aria-label="AI saran balasan"
+                className="w-11 h-11 inline-flex items-center justify-center rounded-md text-brand-700 border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-50"
+              >
+                {suggesting ? <span className="text-xs">…</span> : <span aria-hidden>✨</span>}
+              </button>
+              <button
+                type="submit"
+                disabled={sending || !draft.trim()}
+                className="flex-1 bg-brand-500 text-white text-sm font-medium h-11 rounded-md hover:bg-brand-600 disabled:opacity-50"
+              >
+                {sending ? '…' : 'Kirim'}
+              </button>
+            </div>
+
+            {/* Desktop: vertical stack on right */}
+            <div className="hidden sm:flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="text-xs px-3 py-2 rounded-md text-slate-700 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap"
                 title="Kirim foto atau dokumen (caption pakai isi composer)"
               >
                 {uploading ? '…' : '📎 File'}
@@ -328,7 +443,7 @@ export default function ChatDetail() {
                 type="button"
                 onClick={suggestReply}
                 disabled={suggesting}
-                className="text-xs px-3 py-1.5 rounded-md text-brand-700 border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-50 whitespace-nowrap"
+                className="text-xs px-3 py-2 rounded-md text-brand-700 border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-50 whitespace-nowrap"
                 title="AI saran balasan (bisa diedit sebelum kirim)"
               >
                 {suggesting ? '…' : '✨ AI Suggest'}
@@ -341,6 +456,11 @@ export default function ChatDetail() {
                 {sending ? '…' : 'Kirim'}
               </button>
             </div>
+          </div>
+
+          {/* Hint text — desktop only */}
+          <div className="hidden sm:block text-[11px] text-slate-400 mt-2">
+            Ctrl/⌘+Enter untuk kirim
           </div>
         </form>
         {me.data?.user && (
