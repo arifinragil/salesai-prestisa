@@ -4,6 +4,7 @@ const { verifyWebhookSecret } = require('../middleware/webhookAuth');
 const { resolveByPhone } = require('../services/contactResolver');
 const waClient = require('../services/waClient');
 const settings = require('../services/settings');
+const { downloadAndSave, attachmentTypeFor } = require('../services/uploadService');
 
 const router = express.Router();
 
@@ -55,13 +56,32 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     );
     const conv = convQ.rows[0];
 
-    const msgType = parsed.type === 'media' ? 'media' : 'text';
+    // Pass through the actual media type (image / video / audio / document / media);
+    // fall back to 'text' when no attachment.
+    let msgType = parsed.type && parsed.type !== 'text' ? parsed.type : 'text';
+    let attachmentUrl = parsed.mediaUrl || null;
+
+    // WAHA hosts the media on its internal /tmp dir which gets cleaned up.
+    // Mirror it to our uploads/ NOW so the file is retained even if WAHA evicts.
+    if (attachmentUrl) {
+      try {
+        const saved = await downloadAndSave(attachmentUrl, { mimetype: parsed.mediaMime });
+        attachmentUrl = saved.publicUrl;
+        if (msgType === 'text' || msgType === 'media') {
+          msgType = attachmentTypeFor(saved.mimetype);
+        }
+      } catch (err) {
+        console.error('[webhook/waha] media download failed:', err.message);
+        // Keep original URL — UI fallback will show "image gagal load"
+      }
+    }
+
     const msgQ = await client.query(
       `INSERT INTO crm_messages
          (conversation_id, direction, sender_type, waha_message_id, body, message_type, attachment_url)
        VALUES ($1, 'in', 'customer', $2, $3, $4, $5)
        RETURNING id, created_at`,
-      [conv.id, parsed.wahaMessageId, parsed.body, msgType, parsed.mediaUrl]
+      [conv.id, parsed.wahaMessageId, parsed.body, msgType, attachmentUrl]
     );
     const msg = msgQ.rows[0];
 

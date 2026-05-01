@@ -122,12 +122,22 @@ function parseNative(raw) {
     || (p.message && p.message.extendedTextMessage && p.message.extendedTextMessage.text)
     || null;
 
-  const type = p.hasMedia
-    ? (p.media && p.media.mimetype ? p.media.mimetype.split('/')[0] : 'media')
-    : 'text';
-
-  const mediaUrl = (p.media && (p.media.url || p.media.link)) || null;
-  const mediaMime = (p.media && p.media.mimetype) || null;
+  const mediaObj = p.media || null;
+  const mediaUrl = (mediaObj && (mediaObj.url || mediaObj.link)) || null;
+  const mediaMime = (mediaObj && mediaObj.mimetype) || null;
+  // Detect media from URL OR mimetype OR hasMedia flag — any signal counts.
+  const hasMedia = !!(p.hasMedia || mediaUrl || mediaMime);
+  let type;
+  if (hasMedia) {
+    if (mediaMime) {
+      const main = mediaMime.split('/')[0];
+      type = main === 'application' ? 'document' : main; // image / video / audio / document
+    } else {
+      type = 'media';
+    }
+  } else {
+    type = 'text';
+  }
 
   return {
     phone,

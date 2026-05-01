@@ -70,6 +70,33 @@ router.get('/wa-sessions', async (_req, res) => {
   res.json({ success: true, items: rows });
 });
 
+// Proxy WAHA media files (customer-sent images/audio/video) through our
+// backend so the browser can fetch them — WAHA's media URL is private.
+router.get('/waha-media/:session/:filename', async (req, res) => {
+  const { session, filename } = req.params;
+  if (!/^[a-zA-Z0-9_-]{2,64}$/.test(session) || !/^[a-zA-Z0-9._-]+$/.test(filename)) {
+    return res.status(400).json({ success: false, message: 'invalid path' });
+  }
+  const base = process.env.WAHA_API_URL || 'http://localhost:3000';
+  const upstream = `${base}/api/files/${encodeURIComponent(session)}/${encodeURIComponent(filename)}`;
+  try {
+    const r = await fetch(upstream, {
+      headers: process.env.WAHA_API_KEY ? { 'X-Api-Key': process.env.WAHA_API_KEY } : {},
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      return res.status(r.status).json({ success: false, message: txt.slice(0, 200) });
+    }
+    const ct = r.headers.get('content-type') || 'application/octet-stream';
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.send(buf);
+  } catch (err) {
+    res.status(502).json({ success: false, message: err.message });
+  }
+});
+
 // Search across all messages (and customer phones) — operator-wide.
 router.get('/messages/search', async (req, res) => {
   const q = (req.query.q || '').toString().trim();

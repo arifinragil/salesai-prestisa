@@ -37,4 +37,52 @@ function attachmentTypeFor(mimetype) {
   return 'document';
 }
 
-module.exports = { upload, UPLOAD_ROOT, MAX_BYTES, publicUrlFor, attachmentTypeFor };
+function extFor(mimetype) {
+  const map = {
+    'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
+    'image/webp': '.webp', 'image/gif': '.gif',
+    'video/mp4': '.mp4', 'video/webm': '.webm',
+    'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+    'application/pdf': '.pdf',
+  };
+  return map[String(mimetype || '').toLowerCase()] || '';
+}
+
+// Download a file from a remote URL (WAHA) and save it under uploads/ with a
+// random filename. Returns { localPath, publicUrl, mimetype, size }.
+async function downloadAndSave(rawUrl, opts = {}) {
+  if (!rawUrl) throw new Error('rawUrl required');
+
+  // Rewrite WAHA-internal localhost URL to its public host so we can reach it.
+  let url = rawUrl;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url) && process.env.WAHA_API_URL) {
+    url = url.replace(/^https?:\/\/[^/]+/, process.env.WAHA_API_URL.replace(/\/+$/, ''));
+  }
+
+  const headers = {};
+  if (/waha/i.test(url) && process.env.WAHA_API_KEY) headers['X-Api-Key'] = process.env.WAHA_API_KEY;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`download ${res.status}: ${txt.slice(0, 120)}`);
+  }
+  const mimetype = opts.mimetype || res.headers.get('content-type') || 'application/octet-stream';
+  const ext = opts.ext || extFor(mimetype) || '';
+  const id = crypto.randomBytes(8).toString('hex');
+  const filename = `${Date.now()}-${id}${ext}`;
+  const localPath = path.join(UPLOAD_ROOT, filename);
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(localPath, buf);
+
+  return {
+    localPath,
+    filename,
+    publicUrl: publicUrlFor(filename),
+    mimetype,
+    size: buf.length,
+  };
+}
+
+module.exports = { upload, UPLOAD_ROOT, MAX_BYTES, publicUrlFor, attachmentTypeFor, extFor, downloadAndSave };
