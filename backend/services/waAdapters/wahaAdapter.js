@@ -42,6 +42,17 @@ async function sendText({ phone, text, replyTo }) {
   return { id: res.id || res._data?.id?._serialized || null, raw: res };
 }
 
+async function sendFile({ phone, fileUrl, mimetype, filename, caption }) {
+  const body = {
+    session: SESSION,
+    chatId: phoneToChatId(phone),
+    file: { url: fileUrl, mimetype, filename },
+    caption: caption || undefined,
+  };
+  const res = await postWaha('/api/sendFile', body);
+  return { id: res.id || res._data?.id?._serialized || null, raw: res };
+}
+
 async function sendImage({ phone, imageUrl, caption }) {
   const body = {
     session: SESSION,
@@ -153,4 +164,4 @@ function parseForwarder(raw) {
   };
 }
 
-module.exports = { name: 'waha', sendText, sendImage, parseInbound };
+module.exports = { name: 'waha', sendText, sendImage, sendFile, parseInbound };

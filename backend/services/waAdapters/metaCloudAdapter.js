@@ -6,5 +6,6 @@ module.exports = {
   name: 'metaCloud',
   sendText: notImplemented,
   sendImage: notImplemented,
+  sendFile: notImplemented,
   parseInbound: notImplemented,
 };

@@ -13,5 +13,6 @@ module.exports = {
   provider: adapter.name,
   sendText: (opts) => adapter.sendText(opts),
   sendImage: (opts) => adapter.sendImage(opts),
+  sendFile: (opts) => adapter.sendFile(opts),
   parseInbound: (raw) => adapter.parseInbound(raw),
 };

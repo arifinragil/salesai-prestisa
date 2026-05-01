@@ -1,5 +1,5 @@
 import { useRouter } from 'next/router';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import ChatThread from '@/components/ChatThread';
@@ -18,6 +18,8 @@ export default function ChatDetail() {
   const [suggesting, setSuggesting] = useState(false);
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const conv = useSWR(id ? `/api/inbox/conversations` : null, fetcher, { refreshInterval: 0 });
   const me = useSWR('/api/auth/me', fetcher, { revalidateOnFocus: false, shouldRetryOnError: false });
@@ -115,6 +117,34 @@ export default function ChatDetail() {
       setSummaryLoading(false);
     }
   }, [id, toast]);
+
+  const handleFilePick = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // allow re-pick same file later
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error('File terlalu besar (max 25 MB)');
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (draft.trim()) fd.append('caption', draft.trim());
+      const res = await fetch(`/api/inbox/conversations/${id}/send-file`, {
+        method: 'POST', credentials: 'include', body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+      toast.success(`Terkirim: ${file.name} (${data.type})`);
+      setDraft('');
+      messages.mutate();
+    } catch (err) {
+      toast.error('Upload gagal: ' + err.message);
+    } finally {
+      setUploading(false);
+    }
+  }, [id, draft, messages, toast]);
 
   const setShadow = useCallback(async (enabled) => {
     try {
@@ -268,6 +298,22 @@ export default function ChatDetail() {
               className="flex-1 resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
             />
             <div className="flex flex-col gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
+                className="hidden"
+                onChange={handleFilePick}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="text-xs px-3 py-1.5 rounded-md text-slate-700 border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap"
+                title="Kirim foto atau dokumen (caption pakai isi composer)"
+              >
+                {uploading ? '…' : '📎 File'}
+              </button>
               <button
                 type="button"
                 onClick={suggestReply}

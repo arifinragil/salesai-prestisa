@@ -37,6 +37,12 @@ const path = require('path');
 app.use('/admin', express.static(path.join(__dirname, 'public'), { etag: true, lastModified: true }));
 app.get('/admin', (_req, res) => res.redirect('/admin/waha-sessions.html'));
 
+// Operator-uploaded files (sent to customers via WAHA). Public read so WAHA
+// can fetch by URL — filenames are random nonces (8-byte hex) so listing is
+// effectively impossible without knowing the URL.
+const { UPLOAD_ROOT } = require('./services/uploadService');
+app.use('/uploads', express.static(UPLOAD_ROOT, { etag: true, lastModified: true, maxAge: '7d' }));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/admin', adminRoutes);

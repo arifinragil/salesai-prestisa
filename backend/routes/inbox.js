@@ -8,6 +8,7 @@ const aiClient = require('../services/aiClient');
 const tools = require('../services/aiTools');
 const persona = require('../services/aiPersona');
 const { resolveByPhone } = require('../services/contactResolver');
+const { upload, publicUrlFor, attachmentTypeFor } = require('../services/uploadService');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -110,6 +111,59 @@ router.post('/conversations/:id/send', async (req, res) => {
     message: { id: ins.rows[0].id, direction: 'out', sender_type: 'staff', staff_id: req.staff.staff_id, body, created_at: ins.rows[0].created_at },
   });
   res.json({ success: true, message_id: ins.rows[0].id });
+});
+
+router.post('/conversations/:id/send-file', upload.single('file'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  if (!req.file) return res.status(400).json({ success: false, message: 'file required (multipart field "file")' });
+
+  const conv = await pg.query(`SELECT phone FROM crm_conversations WHERE id = $1`, [id]);
+  if (!conv.rows[0]) return res.status(404).json({ success: false, message: 'conversation not found' });
+
+  const url = publicUrlFor(req.file.filename);
+  const type = attachmentTypeFor(req.file.mimetype);
+  const caption = (req.body?.caption || '').toString().trim() || null;
+
+  let sent;
+  try {
+    if (type === 'image') {
+      sent = await waClient.sendImage({ phone: conv.rows[0].phone, imageUrl: url, caption });
+    } else {
+      sent = await waClient.sendFile({
+        phone: conv.rows[0].phone,
+        fileUrl: url,
+        mimetype: req.file.mimetype,
+        filename: req.file.originalname,
+        caption,
+      });
+    }
+  } catch (err) {
+    logger.error({ err: err.message, convId: id }, '[inbox.send-file] waha failed');
+    return res.status(502).json({ success: false, message: `WAHA send failed: ${err.message}` });
+  }
+
+  const ins = await pg.query(
+    `INSERT INTO crm_messages
+       (conversation_id, direction, sender_type, staff_id, body, message_type, attachment_url, send_status, waha_message_id)
+     VALUES ($1, 'out', 'staff', $2, $3, $4, $5, 'sent', $6)
+     RETURNING id, created_at`,
+    [id, req.staff.staff_id, caption, type, url, sent.id || null]
+  );
+  await pg.query(`UPDATE crm_conversations SET last_message_at = now(), updated_at = now() WHERE id = $1`, [id]);
+
+  notify.notifyMessage({
+    conversation_id: id,
+    message: {
+      id: ins.rows[0].id, direction: 'out', sender_type: 'staff', staff_id: req.staff.staff_id,
+      body: caption, message_type: type, attachment_url: url,
+      created_at: ins.rows[0].created_at,
+    },
+  });
+  res.json({
+    success: true, message_id: ins.rows[0].id, attachment_url: url,
+    type, size: req.file.size, mimetype: req.file.mimetype,
+  });
 });
 
 router.post('/conversations/:id/takeover', async (req, res) => {
