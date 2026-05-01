@@ -13,6 +13,7 @@ const authRoutes = require('./routes/auth');
 const webhookRoutes = require('./routes/webhook');
 const inboxRoutes = require('./routes/inbox');
 const adminRoutes = require('./routes/admin');
+const wahaAdminRoutes = require('./routes/wahaAdmin');
 const healthRoutes = require('./routes/health');
 
 const aiAgent = require('./services/aiAgent');
@@ -34,6 +35,7 @@ app.use(cookieParser());
 app.use('/api/auth', authRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/waha', wahaAdminRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 
