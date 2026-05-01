@@ -1,6 +1,7 @@
 const mysql = require('../db/mysql');
 const pg = require('../db/postgres');
 const waClient = require('./waClient');
+const sqlQueries = require('./sqlQueries');
 const { getFaqTopic, listFaqTopics } = require('./aiKnowledge');
 
 const PRODUCT_IMAGE_BASE = process.env.PRODUCT_IMAGE_BASE || 'https://prestisa.net';
@@ -136,6 +137,18 @@ const declarations = [
         },
       },
       required: ['product_ids'],
+    },
+  },
+  {
+    name: 'run_named_query',
+    description: 'Jalanin SQL query yang sudah di-pre-define admin (whitelisted, read-only) untuk dapat data yang gak ter-cover tools lain. Contoh: "top_seller_per_kota". Cek list query yang tersedia + paramsnya via /api/admin/sql-queries. Tool ini SAFE — admin yang nentuin SQL-nya, AI cuma pilih nama + isi param. Output: rows array (capped per query). Pakai untuk query data spesifik yang admin sudah set.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query_name: { type: 'string', description: 'Nama query yang sudah pre-defined admin (snake_case).' },
+        params: { type: 'object', description: 'Object key-value sesuai params yang query butuhkan.' },
+      },
+      required: ['query_name'],
     },
   },
   {
@@ -452,6 +465,16 @@ async function track_order({ args }) {
   };
 }
 
+async function run_named_query({ args }) {
+  const name = String(args.query_name || '').trim();
+  if (!name) return { error: 'query_name wajib diisi' };
+  try {
+    return await sqlQueries.run(name, args.params || {});
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 async function recommend_products({ args, conv }) {
   const ids = (Array.isArray(args.product_ids) ? args.product_ids : [])
     .slice(0, 3)
@@ -534,6 +557,7 @@ const executors = {
   get_order_status,
   track_order,
   recommend_products,
+  run_named_query,
   request_handover,
 };
 

@@ -1,5 +1,6 @@
 const pg = require('../db/postgres');
 const mysql = require('../db/mysql');
+const sqlQueries = require('./sqlQueries');
 
 async function loadActivePrompt() {
   const { rows } = await pg.query(
@@ -34,9 +35,26 @@ function summarizeOrders(orders) {
   }).join('\n');
 }
 
+async function listNamedQueriesForPrompt() {
+  try {
+    const queries = await sqlQueries.listEnabled();
+    if (!queries.length) return '';
+    const lines = queries.map((q) => {
+      const params = (q.params || [])
+        .map((p) => `${p.name}${p.required ? '*' : ''}:${p.type || 'string'}`)
+        .join(', ');
+      return `  - ${q.name}(${params}) → ${q.description}`;
+    });
+    return `\n\n=== NAMED SQL QUERIES (pakai via run_named_query tool) ===\n${lines.join('\n')}\nNote: param dengan * = required.\n=== END QUERIES ===`;
+  } catch {
+    return '';
+  }
+}
+
 async function buildSystemPrompt({ conv, customerName, cityHint }) {
   const active = await loadActivePrompt();
   const orders = await fetchRecentOrders(conv.customer_id, 3);
+  const queriesBlock = await listNamedQueriesForPrompt();
 
   const customerLine = conv.customer_id
     ? `- Customer ID: ${conv.customer_id}, Nama: ${customerName || '(tidak diketahui)'}`
@@ -55,7 +73,7 @@ ${intentLine}
 ${summarizeOrders(orders)}
 === END KONTEKS ===`.trim();
 
-  return `${active.prompt_text}\n\n${dynamic}`;
+  return `${active.prompt_text}\n\n${dynamic}${queriesBlock}`;
 }
 
 function buildHistoryMessages(rows) {

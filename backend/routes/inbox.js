@@ -4,6 +4,10 @@ const { requireStaff } = require('../middleware/auth');
 const waClient = require('../services/waClient');
 const notify = require('../services/notify');
 const logger = require('../services/logger');
+const aiClient = require('../services/aiClient');
+const tools = require('../services/aiTools');
+const persona = require('../services/aiPersona');
+const { resolveByPhone } = require('../services/contactResolver');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -167,6 +171,118 @@ router.get('/handovers', async (req, res) => {
     ORDER BY h.created_at DESC LIMIT 200`;
   const { rows } = await pg.query(sql);
   res.json({ success: true, items: rows });
+});
+
+// ── AI helpers untuk operator (suggest reply + summary) ────────────────────
+
+async function loadConvContext(convId, historyLimit = 30) {
+  const c = await pg.query(`SELECT * FROM crm_conversations WHERE id = $1`, [convId]);
+  if (!c.rows[0]) return null;
+  const m = await pg.query(
+    `SELECT direction, sender_type, body, message_type, created_at
+     FROM crm_messages WHERE conversation_id = $1
+     ORDER BY id DESC LIMIT $2`,
+    [convId, historyLimit]
+  );
+  return { conv: c.rows[0], messages: m.rows.reverse() };
+}
+
+router.post('/conversations/:id/ai-suggest-reply', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const ctx = await loadConvContext(id);
+  if (!ctx) return res.status(404).json({ success: false, message: 'conversation not found' });
+  if (!ctx.messages.length) return res.status(400).json({ success: false, message: 'belum ada pesan' });
+
+  const resolved = await resolveByPhone(ctx.conv.phone);
+  // Slightly different system prompt: AI suggests for OPERATOR to send (not autonomous)
+  const baseSystem = await persona.buildSystemPrompt({
+    conv: ctx.conv, customerName: resolved.name, cityHint: null,
+  });
+  const systemPrompt = `${baseSystem}
+
+=== MODE: OPERATOR ASSIST ===
+Saat ini operator manusia yang sedang handle chat ini. Tugasmu:
+- Saran 1 balasan SINGKAT (1-3 kalimat) untuk dikirim operator ke customer.
+- Pakai tools dulu kalau perlu data (search_products, track_order, dll).
+- Output HANYA teks balasan akhir — operator akan baca, edit (kalau perlu), lalu kirim.
+- JANGAN pakai tool request_handover di sini (kita SUDAH di-handover).
+- JANGAN sapa "Halo Kak" lagi kalau di history sudah ada sapaan; lanjutkan natural.`;
+
+  const messages = persona.buildHistoryMessages(ctx.messages);
+  if (!messages.length || messages[messages.length - 1].role !== 'user') {
+    messages.push({ role: 'user', content: '(Operator minta saran balasan untuk pesan terakhir customer)' });
+  }
+
+  const exec = (name, args) => {
+    if (name === 'request_handover') {
+      return Promise.resolve({ ok: false, error: 'request_handover blocked in operator-assist mode' });
+    }
+    const fn = tools.executors[name];
+    if (!fn) return Promise.resolve({ error: `unknown tool ${name}` });
+    return Promise.resolve(fn({ args, conv: ctx.conv, customer_id: ctx.conv.customer_id, phone: ctx.conv.phone }));
+  };
+
+  try {
+    const llm = await aiClient.generateWithTools({
+      systemPrompt, messages, tools: tools.declarations, executor: exec, maxIterations: 4,
+    });
+    res.json({
+      success: true,
+      reply: (llm.text || '').trim(),
+      tools_used: llm.calls.map((c) => ({ name: c.name, args: c.args, error: c.error || null })),
+      usage: llm.usage,
+    });
+  } catch (err) {
+    logger.error({ err: err.message, convId: id }, '[ai-suggest-reply] failed');
+    res.status(502).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/conversations/:id/ai-summary', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const ctx = await loadConvContext(id, 60);
+  if (!ctx) return res.status(404).json({ success: false, message: 'conversation not found' });
+  if (!ctx.messages.length) return res.status(400).json({ success: false, message: 'belum ada pesan' });
+
+  const transcript = ctx.messages
+    .map((m) => {
+      const who = m.sender_type === 'customer' ? 'Customer'
+        : m.sender_type === 'staff' ? 'Operator'
+        : 'Tiara';
+      return `${who}: ${(m.body || `[${m.message_type || 'attachment'}]`).slice(0, 300)}`;
+    })
+    .join('\n');
+
+  const systemPrompt = `Kamu asisten yang bantu operator CS Prestisa cepat catch-up percakapan WhatsApp.`;
+  const messages = [{
+    role: 'user',
+    content: `Ringkas percakapan berikut dalam Bahasa Indonesia. Format:
+
+**Ringkasan:** 2-3 kalimat tentang situasinya.
+**Kebutuhan customer:** apa yang dia minta / butuhkan.
+**Status:** sudah diselesaikan / butuh tindakan operator / menunggu customer.
+**Action item:** kalau ada, list 1-3 hal yang perlu operator lakukan selanjutnya.
+
+Transkrip (${ctx.messages.length} pesan):
+${transcript}`,
+  }];
+
+  try {
+    const llm = await aiClient.generateWithTools({
+      systemPrompt, messages, tools: [], executor: () => ({}), maxIterations: 1,
+    });
+    res.json({
+      success: true,
+      summary: (llm.text || '').trim(),
+      message_count: ctx.messages.length,
+      usage: llm.usage,
+    });
+  } catch (err) {
+    logger.error({ err: err.message, convId: id }, '[ai-summary] failed');
+    res.status(502).json({ success: false, message: err.message });
+  }
 });
 
 router.post('/handovers/:id/resolve', async (req, res) => {

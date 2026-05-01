@@ -4,6 +4,7 @@ const { requireStaff } = require('../middleware/auth');
 const settingsSvc = require('../services/settings');
 const costGuard = require('../services/costGuard');
 const aiClient = require('../services/aiClient');
+const sqlQueries = require('../services/sqlQueries');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -41,6 +42,57 @@ router.get('/settings', async (_req, res) => {
 router.get('/ai/provider', async (_req, res) => {
   const status = await aiClient.getActiveStatus();
   res.json({ success: true, ...status, valid_providers: aiClient.VALID_PROVIDERS });
+});
+
+// ── SQL queries (named templates AI can run via run_named_query tool) ──────
+
+router.get('/sql-queries', async (_req, res) => {
+  res.json({ success: true, items: await sqlQueries.listAll() });
+});
+
+router.post('/sql-queries', async (req, res) => {
+  const { name, description, params, sql_text, row_limit } = req.body || {};
+  if (!name || !description || !sql_text) {
+    return res.status(400).json({ success: false, message: 'name, description, sql_text required' });
+  }
+  if (!/^[a-z][a-z0-9_]{2,63}$/.test(name)) {
+    return res.status(400).json({ success: false, message: 'name must be snake_case (a-z0-9_, 3-64 chars)' });
+  }
+  try {
+    const out = await sqlQueries.create({ name, description, params: params || [], sql_text, row_limit, created_by: req.staff.staff_id });
+    res.json({ success: true, id: out.id });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+router.put('/sql-queries/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  try {
+    await sqlQueries.update(id, req.body || {});
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/sql-queries/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  await sqlQueries.remove(id);
+  res.json({ success: true });
+});
+
+router.post('/sql-queries/test', async (req, res) => {
+  const { name, params } = req.body || {};
+  if (!name) return res.status(400).json({ success: false, message: 'name required' });
+  try {
+    const out = await sqlQueries.run(name, params || {});
+    res.json({ success: true, ...out });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 });
 
 router.get('/ai/models', async (req, res) => {

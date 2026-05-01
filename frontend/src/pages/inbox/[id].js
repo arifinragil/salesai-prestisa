@@ -15,6 +15,9 @@ export default function ChatDetail() {
   const toast = useToast();
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   const conv = useSWR(id ? `/api/inbox/conversations` : null, fetcher, { refreshInterval: 0 });
   const me = useSWR('/api/auth/me', fetcher, { revalidateOnFocus: false, shouldRetryOnError: false });
@@ -81,6 +84,38 @@ export default function ChatDetail() {
     }
   }, [id, conv, toast]);
 
+  const suggestReply = useCallback(async () => {
+    setSuggesting(true);
+    try {
+      const r = await api(`/api/inbox/conversations/${id}/ai-suggest-reply`, { method: 'POST' });
+      const text = (r.reply || '').trim();
+      if (!text) {
+        toast.error('AI tidak menghasilkan saran');
+      } else {
+        setDraft(text);
+        const tools = (r.tools_used || []).map((t) => t.name).join(', ');
+        toast.success(tools ? `Saran AI siap (tools: ${tools})` : 'Saran AI siap');
+      }
+    } catch (err) {
+      toast.error('Suggest gagal: ' + err.message);
+    } finally {
+      setSuggesting(false);
+    }
+  }, [id, toast]);
+
+  const summarizeChat = useCallback(async () => {
+    setSummaryLoading(true);
+    setSummary(null);
+    try {
+      const r = await api(`/api/inbox/conversations/${id}/ai-summary`, { method: 'POST' });
+      setSummary({ text: r.summary, count: r.message_count, at: new Date().toISOString() });
+    } catch (err) {
+      toast.error('Summary gagal: ' + err.message);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [id, toast]);
+
   const setShadow = useCallback(async (enabled) => {
     try {
       await api(`/api/inbox/conversations/${id}/shadow`, {
@@ -128,6 +163,14 @@ export default function ChatDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={summarizeChat}
+              disabled={summaryLoading}
+              className="text-xs px-3 py-1.5 rounded-md text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 disabled:opacity-50"
+              title="Ringkasan AI"
+            >
+              {summaryLoading ? '…' : '📋 Summary'}
+            </button>
             {isPaused ? (
               <button
                 onClick={() => callAction('/resume-ai', 'Resume AI')}
@@ -172,6 +215,26 @@ export default function ChatDetail() {
         {/* Handover banner */}
         <HandoverBanner handovers={convHandovers} onResolved={() => handovers.mutate()} />
 
+        {/* AI summary panel */}
+        {summary && (
+          <div className="mx-4 mt-3 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-purple-800 mb-1">
+                  Ringkasan AI · {summary.count} pesan
+                </div>
+                <div className="text-sm text-purple-900 whitespace-pre-wrap">{summary.text}</div>
+              </div>
+              <button
+                onClick={() => setSummary(null)}
+                className="text-xs text-purple-600 hover:text-purple-900"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto bg-slate-50">
           {messages.isLoading && (
@@ -188,28 +251,41 @@ export default function ChatDetail() {
         {/* Composer */}
         <form
           onSubmit={sendReply}
-          className="bg-white border-t border-slate-200 px-4 py-3 flex items-end gap-3"
+          className="bg-white border-t border-slate-200 px-4 py-3"
         >
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                sendReply();
-              }
-            }}
-            placeholder="Ketik balasan operator… (Ctrl/⌘+Enter untuk kirim)"
-            rows={2}
-            className="flex-1 resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
-          />
-          <button
-            type="submit"
-            disabled={sending || !draft.trim()}
-            className="bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-md hover:bg-brand-600 disabled:opacity-50"
-          >
-            {sending ? '…' : 'Kirim'}
-          </button>
+          <div className="flex items-end gap-3">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  sendReply();
+                }
+              }}
+              placeholder="Ketik balasan operator… (Ctrl/⌘+Enter untuk kirim)"
+              rows={2}
+              className="flex-1 resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+            />
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={suggestReply}
+                disabled={suggesting}
+                className="text-xs px-3 py-1.5 rounded-md text-brand-700 border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-50 whitespace-nowrap"
+                title="AI saran balasan (bisa diedit sebelum kirim)"
+              >
+                {suggesting ? '…' : '✨ AI Suggest'}
+              </button>
+              <button
+                type="submit"
+                disabled={sending || !draft.trim()}
+                className="bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-md hover:bg-brand-600 disabled:opacity-50"
+              >
+                {sending ? '…' : 'Kirim'}
+              </button>
+            </div>
+          </div>
         </form>
         {me.data?.user && (
           <div className="text-xs text-slate-400 px-4 pb-2">
