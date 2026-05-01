@@ -1,9 +1,10 @@
-node_modules/
-.env
 *.log
-.next/
-out/
-dist/
-coverage/
 .DS_Store
+.env
+.next/
 .worktrees/
+coverage/
+dist/
+node_modules/
+out/
+uploads/
