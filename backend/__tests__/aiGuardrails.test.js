@@ -17,8 +17,14 @@ describe('hasHesitation', () => {
   test('detects common hedging phrases', () => {
     expect(hasHesitation('aku kurang yakin Kak')).toBe(true);
     expect(hasHesitation('Saya tidak tahu')).toBe(true);
-    expect(hasHesitation('mungkin sekitar 500rb')).toBe(true);
-    expect(hasHesitation('kayaknya iya')).toBe(true);
+    expect(hasHesitation('aku tidak yakin Kak')).toBe(true);
+    expect(hasHesitation('belum yakin sih')).toBe(true);
+    expect(hasHesitation('Maaf, saya tidak bisa pastikan')).toBe(true);
+  });
+  test('does NOT flag normal Indonesian filler words alone', () => {
+    expect(hasHesitation('mungkin pilihan ini cocok')).toBe(false);
+    expect(hasHesitation('sepertinya papan sukacita pas')).toBe(false);
+    expect(hasHesitation('kayaknya bouquet ini cantik')).toBe(false);
   });
   test('clean reply returns false', () => {
     expect(hasHesitation('Pilihan papan sukacita harga 750.000 ya Kak')).toBe(false);

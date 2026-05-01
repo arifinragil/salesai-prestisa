@@ -108,5 +108,25 @@ describe('wahaAdapter.parseInbound (real)', () => {
       expect(out.type).toBe('image');
       expect(out.mediaUrl).toBe('https://x/y.jpg');
     });
+
+    test('@lid sender stores full JID as phone for sendback routing', () => {
+      const out = waha.parseInbound({
+        event: 'message',
+        payload: { id: 'x', from: '121500363444442@lid', fromMe: false, body: 'halo' },
+      });
+      expect(out.phone).toBe('121500363444442@lid');
+      expect(out.skip).toBeNull();
+    });
+
+    test('@lid resolved via _data.author falls back to phone JID', () => {
+      const out = waha.parseInbound({
+        event: 'message',
+        payload: {
+          id: 'x', from: '121500363444442@lid', fromMe: false, body: 'halo',
+          _data: { author: '628123@s.whatsapp.net' },
+        },
+      });
+      expect(out.phone).toBe('628123');
+    });
   });
 });

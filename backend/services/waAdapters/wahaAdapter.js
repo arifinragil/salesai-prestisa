@@ -9,7 +9,14 @@ function authHeaders() {
 }
 
 function phoneToChatId(phone) {
-  const digits = String(phone).replace(/\D/g, '');
+  const s = String(phone || '').trim();
+  // If already a full JID, pass through (handles @c.us, @s.whatsapp.net, @lid)
+  if (s.includes('@')) return s;
+  const digits = s.replace(/\D/g, '');
+  // LIDs are typically 14+ digits without @ prefix; phone numbers are <=15.
+  // We can't perfectly distinguish, but LID stored as bare digits is rare —
+  // contactResolver-side stores normalized phone, and parseInbound preserves
+  // the JID context. Default to @c.us for plain digits.
   return `${digits}@c.us`;
 }
 
@@ -60,11 +67,31 @@ function parseNative(raw) {
     return { skip: 'fromMe', phone: null, body: null };
   }
 
-  const jid = p.from || '';
+  // Resolve sender JID. WAHA NOWEB sometimes emits LID (Linked Identifier)
+  // instead of a phone-number JID. LID is an opaque WhatsApp internal ID,
+  // not a phone number — we try several fields to find a real phone:
+  //   1. participant (group msg author)
+  //   2. _data.notifyName / pushName (display name only, not a number)
+  //   3. _data.author / _data.id.remote (sometimes preserves phone JID)
+  //   4. fall back to from
+  let jid = p.from || '';
+  if (jid.endsWith('@lid')) {
+    const alt = p.participant
+      || (p._data && (p._data.author || (p._data.id && p._data.id.remote)))
+      || (p.key && (p.key.participant || p.key.remoteJid))
+      || '';
+    if (alt && !String(alt).endsWith('@lid')) {
+      jid = String(alt);
+    }
+  }
+
   const head = String(jid).split('@')[0];
-  const phone = head.replace(/\D/g, '') || null;
   const isGroup = String(jid).endsWith('@g.us');
   const isBroadcast = String(jid).endsWith('@broadcast');
+  const isLid = String(jid).endsWith('@lid');
+  // For LID JIDs, store the full JID as `phone` so reply-routing preserves @lid.
+  // For normal phone JIDs, store bare digits (existing convention).
+  const phone = isLid ? jid : (head.replace(/\D/g, '') || null);
 
   // Body extraction — body is usually at root, sometimes nested in media
   const body = p.body
@@ -88,6 +115,8 @@ function parseNative(raw) {
     type,
     mediaUrl,
     mediaMime,
+    // LID is acceptable as conversation key — WAHA understands LID for sendText routing.
+    // Customer just won't be linked to MySQL customer table (no LID lookup yet).
     skip: isGroup ? 'group' : (isBroadcast ? 'broadcast' : null),
   };
 }

@@ -1,13 +1,13 @@
+// Only trigger handover on STRONG hedging. "mungkin" / "sepertinya" alone
+// are too common in normal Indonesian speech and cause false positives.
+// Require pairing with uncertainty markers (e.g., "saya kurang yakin").
 const HESITATION_PATTERNS = [
   /kurang yakin/i,
-  /tidak (yakin|tahu|pasti)/i,
-  /\bgak (yakin|tau|tahu)\b/i,
-  /\bnggak (yakin|tau|tahu)\b/i,
-  /\bmungkin\b/i,
-  /\bkayaknya\b/i,
-  /\bsepertinya\b/i,
-  /\bbisa jadi\b/i,
-  /maaf saya tidak/i,
+  /\b(saya|aku) (tidak|gak|nggak)\s+(yakin|tahu|tau|pasti)/i,
+  /tidak\s+(bisa|tau|tahu)\s+pastikan/i,
+  /\bbelum (yakin|pasti|tahu)\b/i,
+  /maaf,? (saya|aku) tidak (tahu|tau|yakin|bisa)/i,
+  /\bsaya (kurang|nggak|gak) (paham|ngerti|tau)\b/i,
 ];
 
 const SPECIFIC_ETA_PATTERNS = [
