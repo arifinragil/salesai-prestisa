@@ -8,6 +8,7 @@ const guardrails = require('./aiGuardrails');
 const confidence = require('./aiConfidence');
 const notify = require('./notify');
 const logger = require('./logger');
+const costGuard = require('./costGuard');
 const { resolveByPhone } = require('./contactResolver');
 
 const SAFE_HANDOVER_REPLY = 'Sebentar Kak, aku panggilkan tim ya. Tim Prestisa segera bantu jawab.';
@@ -180,6 +181,24 @@ async function processOne() {
       await markJob(client, job.id, 'done');
       notify.notifyHandover({ conversation_id: conv.id, reason: cls.intent, summary: `pre-classifier flagged ${cls.intent}` });
       return { ok: true, handover: true, handover_id: hoId, handover_reason: cls.intent, conversation_id: conv.id };
+    }
+
+    // Cost cap check (per spec §15 risk #3): if today's accumulated cost
+    // already exceeds the configured cap, skip Claude and handover.
+    let cap;
+    try { cap = await costGuard.checkCap(); } catch (err) {
+      logger.warn({ err: err.message }, '[aiAgent] cost cap check failed (continuing)');
+    }
+    if (cap && cap.overCap) {
+      const hoId = await recordHandover(client, {
+        convId: conv.id, msgId: msg.id, reason: 'other',
+        summary: `cost_cap_reached: $${cap.current.toFixed(4)} >= $${cap.cap}`,
+      });
+      await sendSafeHandoverReply(client, conv);
+      await markJob(client, job.id, 'done');
+      notify.notifyHandover({ conversation_id: conv.id, reason: 'cost_cap_reached', summary: `today $${cap.current.toFixed(2)} / cap $${cap.cap}` });
+      logger.warn({ current: cap.current, cap: cap.cap }, '[aiAgent] daily cost cap reached — handover');
+      return { ok: true, handover: true, handover_id: hoId, handover_reason: 'cost_cap_reached', conversation_id: conv.id };
     }
 
     const resolved = await resolveByPhone(conv.phone);

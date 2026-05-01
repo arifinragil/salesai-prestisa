@@ -3,6 +3,7 @@ const pg = require('../db/postgres');
 const { verifyWebhookSecret } = require('../middleware/webhookAuth');
 const { resolveByPhone } = require('../services/contactResolver');
 const waClient = require('../services/waClient');
+const settings = require('../services/settings');
 
 const router = express.Router();
 
@@ -37,16 +38,17 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     }
 
     const resolved = await resolveByPhone(parsed.phone);
+    const shadowDefault = !!(await settings.getSetting('shadow_mode_default', false));
 
     const convQ = await client.query(
-      `INSERT INTO crm_conversations (phone, customer_id, last_message_at)
-       VALUES ($1, $2, now())
+      `INSERT INTO crm_conversations (phone, customer_id, last_message_at, shadow_mode)
+       VALUES ($1, $2, now(), $3)
        ON CONFLICT (phone) DO UPDATE SET
          last_message_at = now(),
          customer_id = COALESCE(crm_conversations.customer_id, EXCLUDED.customer_id),
          updated_at = now()
        RETURNING id, ai_enabled, ai_paused_until, status, shadow_mode`,
-      [parsed.phone, resolved.customer_id]
+      [parsed.phone, resolved.customer_id, shadowDefault]
     );
     const conv = convQ.rows[0];
 

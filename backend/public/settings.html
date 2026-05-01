@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Settings — Tiara Admin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { --fg:#222; --muted:#777; --bg:#f7f7f8; --card:#fff; --line:#e5e5ea; --green:#0a7; --red:#c33; --yellow:#d80; }
+    * { box-sizing: border-box; }
+    body { font: 14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: var(--bg); color: var(--fg); margin: 0; }
+    header { background:#fff; border-bottom:1px solid var(--line); padding:12px 24px; display:flex; align-items:center; justify-content:space-between; }
+    header h1 { margin:0; font-size:16px; font-weight:600; }
+    nav a { color: var(--muted); text-decoration: none; font-size: 13px; margin-right: 16px; }
+    nav a:hover, nav a.active { color: var(--fg); }
+    main { max-width:760px; margin:24px auto; padding:0 24px; }
+    .card { background: var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+    h2 { margin:0 0 4px; font-size:15px; font-weight:600; }
+    .desc { color: var(--muted); font-size:13px; margin-bottom: 12px; }
+    .row { display:flex; align-items:center; gap:12px; margin: 10px 0; }
+    input[type=number] { width: 120px; padding:8px; border:1px solid var(--line); border-radius:6px; font-size:14px; }
+    label.toggle { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+    button { font:inherit; padding:8px 14px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+    button.primary { background: var(--green); border-color: var(--green); color:#fff; }
+    button:disabled { opacity: .5; cursor: wait; }
+    .meter { background:#f0f0f3; border-radius:999px; overflow:hidden; height:10px; margin: 8px 0; }
+    .meter > div { background: var(--green); height: 100%; transition: width .3s, background .3s; }
+    .meter.warn > div { background: var(--yellow); }
+    .meter.over > div { background: var(--red); }
+    .stat { display:flex; gap:16px; align-items:baseline; flex-wrap: wrap; }
+    .stat .big { font-size: 22px; font-weight: 600; }
+    .stat .muted { color: var(--muted); font-size: 13px; }
+    .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:10px 18px; border-radius:6px; opacity:0; transition: opacity .2s; pointer-events:none; max-width:80%; }
+    .toast.show { opacity: 1; }
+    .toast.err { background: var(--red); }
+    a.logout { color: var(--muted); text-decoration: none; font-size:13px; }
+    a.logout:hover { color: var(--red); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tiara Admin</h1>
+    <nav>
+      <a href="/admin/waha-sessions.html">WAHA Sessions</a>
+      <a href="/admin/settings.html" class="active">Settings</a>
+      <a class="logout" href="#" id="logout">Logout</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Today's AI cost</h2>
+      <div class="desc">Live count from <code>crm_messages.ai_metadata</code> untuk hari ini (UTC). Reset jam 00:00 UTC.</div>
+      <div class="stat">
+        <div class="big" id="costNow">$—</div>
+        <div class="muted">/ cap <span id="costCap">$—</span> · <span id="costPercent">—%</span></div>
+      </div>
+      <div class="meter" id="meter"><div id="meterFill" style="width:0%"></div></div>
+      <div class="muted" id="capStatus">Loading…</div>
+    </section>
+
+    <section class="card">
+      <h2>Daily cost cap (USD)</h2>
+      <div class="desc">Kalau accumulated cost hari ini ≥ cap, AI auto-handover semua inbound dengan reason <code>cost_cap_reached</code>. Reset jam 00:00 UTC.</div>
+      <div class="row">
+        <input type="number" id="capInput" min="0" step="0.5">
+        <button class="primary" id="saveCap">Save</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Global AI toggle</h2>
+      <div class="desc">Kill switch — kalau OFF, semua inbound di-skip (queue tetap masuk, tapi worker langsung mark <code>skipped: ai_disabled_global</code>). Tidak persistent — reset ke ON saat backend restart kecuali env <code>AI_GLOBAL_ENABLED=false</code>.</div>
+      <div class="row">
+        <label class="toggle"><input type="checkbox" id="aiGlobal"> AI enabled</label>
+        <button id="saveAiGlobal">Apply</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Shadow mode (default for new conversations)</h2>
+      <div class="desc">Saat ON, conversation baru auto-set <code>shadow_mode = true</code> → AI generate reply tapi tidak kirim ke customer (cuma ditulis ke DB, operator review). Conversation existing tidak terpengaruh.</div>
+      <div class="row">
+        <label class="toggle"><input type="checkbox" id="shadowDefault"> Shadow new conversations</label>
+        <button id="saveShadow">Save</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <script>
+    function toast(msg, isErr) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.toggle('err', !!isErr);
+      t.classList.add('show');
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove('show'), 2400);
+    }
+
+    async function api(path, method, body) {
+      const opts = { method: method || 'GET', credentials: 'include', headers: {} };
+      if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+      const res = await fetch(path, opts);
+      if (res.status === 401) { location.href = '/admin/login.html?next=' + encodeURIComponent(location.pathname); throw new Error('unauthenticated'); }
+      const text = await res.text();
+      let data; try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { message: text }; }
+      if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+      return data;
+    }
+
+    async function loadCost() {
+      try {
+        const r = await api('/api/admin/cost/today');
+        document.getElementById('costNow').textContent = '$' + r.current.toFixed(4);
+        document.getElementById('costCap').textContent = '$' + r.cap.toFixed(2);
+        document.getElementById('costPercent').textContent = r.percent + '%';
+        const meter = document.getElementById('meter');
+        meter.classList.remove('warn', 'over');
+        if (r.percent >= 100) meter.classList.add('over');
+        else if (r.percent >= 80) meter.classList.add('warn');
+        document.getElementById('meterFill').style.width = Math.min(r.percent, 100) + '%';
+        document.getElementById('capStatus').textContent = r.overCap
+          ? '⚠ Cap reached — AI di-handover untuk semua inbound sampai jam 00:00 UTC besok.'
+          : (r.percent >= 80 ? 'Mendekati cap — pertimbangkan naikkan limit atau tunggu reset.' : 'Aman.');
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function loadSettings() {
+      try {
+        const r = await api('/api/admin/settings');
+        const map = {};
+        for (const it of r.items) map[it.key] = it.value;
+        if (typeof map.daily_cost_cap_usd === 'number') {
+          document.getElementById('capInput').value = map.daily_cost_cap_usd;
+        }
+        if (typeof map.shadow_mode_default === 'boolean') {
+          document.getElementById('shadowDefault').checked = map.shadow_mode_default;
+        }
+        const ai = await api('/api/admin/ai/global');
+        document.getElementById('aiGlobal').checked = !!ai.enabled;
+      } catch (e) { toast(e.message, true); }
+    }
+
+    document.getElementById('saveCap').addEventListener('click', async (ev) => {
+      const v = parseFloat(document.getElementById('capInput').value);
+      if (!isFinite(v) || v < 0) return toast('cap must be non-negative number', true);
+      ev.target.disabled = true;
+      try {
+        await api('/api/admin/settings/daily_cost_cap_usd', 'PUT', { value: v });
+        toast('Cap saved: $' + v);
+        loadCost();
+      } catch (e) { toast(e.message, true); }
+      finally { ev.target.disabled = false; }
+    });
+
+    document.getElementById('saveAiGlobal').addEventListener('click', async (ev) => {
+      const enabled = document.getElementById('aiGlobal').checked;
+      ev.target.disabled = true;
+      try {
+        await api('/api/admin/ai/global', 'POST', { enabled: enabled });
+        toast('AI global ' + (enabled ? 'ON' : 'OFF'));
+      } catch (e) { toast(e.message, true); }
+      finally { ev.target.disabled = false; }
+    });
+
+    document.getElementById('saveShadow').addEventListener('click', async (ev) => {
+      const v = document.getElementById('shadowDefault').checked;
+      ev.target.disabled = true;
+      try {
+        await api('/api/admin/settings/shadow_mode_default', 'PUT', { value: v });
+        toast('Shadow default ' + (v ? 'ON' : 'OFF') + ' (untuk new conv)');
+      } catch (e) { toast(e.message, true); }
+      finally { ev.target.disabled = false; }
+    });
+
+    document.getElementById('logout').addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      try { await api('/api/auth/logout', 'POST'); } catch (e) {}
+      location.href = '/admin/login.html';
+    });
+
+    loadCost();
+    loadSettings();
+    setInterval(loadCost, 10_000);
+  </script>
+</body>
+</html>

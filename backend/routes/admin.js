@@ -1,9 +1,45 @@
 const express = require('express');
 const pg = require('../db/postgres');
 const { requireStaff } = require('../middleware/auth');
+const settingsSvc = require('../services/settings');
+const costGuard = require('../services/costGuard');
 
 const router = express.Router();
 router.use(requireStaff);
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+const ALLOWED_SETTING_KEYS = new Set(['daily_cost_cap_usd', 'shadow_mode_default']);
+
+router.get('/settings', async (_req, res) => {
+  const items = await settingsSvc.listSettings();
+  res.json({ success: true, items });
+});
+
+router.put('/settings/:key', async (req, res) => {
+  const key = req.params.key;
+  if (!ALLOWED_SETTING_KEYS.has(key)) {
+    return res.status(400).json({ success: false, message: `setting "${key}" not allowed` });
+  }
+  if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'value')) {
+    return res.status(400).json({ success: false, message: 'body.value required' });
+  }
+  let value = req.body.value;
+  if (key === 'daily_cost_cap_usd') {
+    const n = parseFloat(value);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ success: false, message: 'value must be non-negative number' });
+    value = n;
+  } else if (key === 'shadow_mode_default') {
+    value = !!value;
+  }
+  await settingsSvc.setSetting(key, value, req.staff.staff_id);
+  res.json({ success: true, key, value });
+});
+
+router.get('/cost/today', async (_req, res) => {
+  const r = await costGuard.checkCap();
+  res.json({ success: true, ...r });
+});
 
 // ── Persona ──────────────────────────────────────────────────────────────────
 
