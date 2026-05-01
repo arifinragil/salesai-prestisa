@@ -42,6 +42,17 @@ async function sendText({ phone, text, replyTo }) {
   return { id: res.id || res._data?.id?._serialized || null, raw: res };
 }
 
+async function sendImage({ phone, imageUrl, caption }) {
+  const body = {
+    session: SESSION,
+    chatId: phoneToChatId(phone),
+    file: { url: imageUrl },
+    caption: caption || undefined,
+  };
+  const res = await postWaha('/api/sendImage', body);
+  return { id: res.id || res._data?.id?._serialized || null, raw: res };
+}
+
 // Normalize WAHA inbound webhook payload to canonical shape.
 // Supports two formats:
 //   1. Native WAHA webhook (NOWEB/WEBJS engines):
@@ -141,4 +152,4 @@ function parseForwarder(raw) {
   };
 }
 
-module.exports = { name: 'waha', sendText, parseInbound };
+module.exports = { name: 'waha', sendText, sendImage, parseInbound };

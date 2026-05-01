@@ -1,6 +1,17 @@
 const mysql = require('../db/mysql');
 const pg = require('../db/postgres');
+const waClient = require('./waClient');
 const { getFaqTopic, listFaqTopics } = require('./aiKnowledge');
+
+const PRODUCT_IMAGE_BASE = process.env.PRODUCT_IMAGE_BASE || 'https://prestisa.net';
+
+function fullImageUrl(image) {
+  if (!image) return null;
+  const s = String(image).trim();
+  if (s.startsWith('http://') || s.startsWith('https://')) return s;
+  if (s.startsWith('/')) return PRODUCT_IMAGE_BASE + s;
+  return PRODUCT_IMAGE_BASE + '/' + s;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +110,21 @@ const declarations = [
         order_id: { type: 'integer', description: 'ID internal order.' },
       },
       required: ['order_id'],
+    },
+  },
+  {
+    name: 'recommend_products',
+    description: 'Kirim 1-3 produk rekomendasi sebagai foto + caption (nama, harga) langsung ke chat customer via WhatsApp. Pakai SETELAH search_products dapat produk yang cocok dan kamu mau pamerkan ke customer dengan visual. Setelah pakai tool ini, lanjutkan reply text seperti biasa (mis. "Itu beberapa pilihannya Kak, mau yang mana?"). JANGAN kirim URL gambar di text reply — biarkan tool ini yang ngirim.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        product_ids: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'ID produk dari hasil search_products (max 3 sekaligus, pilih yang paling relevan).',
+        },
+      },
+      required: ['product_ids'],
     },
   },
   {
@@ -342,6 +368,55 @@ async function get_order_status({ args, customer_id }) {
   };
 }
 
+async function recommend_products({ args, conv }) {
+  const ids = (Array.isArray(args.product_ids) ? args.product_ids : [])
+    .slice(0, 3)
+    .map((v) => parseInt(v))
+    .filter(Number.isFinite);
+  if (!ids.length) return { error: 'product_ids wajib diisi (1-3 integer)' };
+
+  const placeholders = ids.map(() => '?').join(',');
+  const [rows] = await mysql.query(
+    `SELECT id, name, price, image FROM products WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+    ids
+  );
+
+  if (!rows.length) return { error: 'produk tidak ditemukan' };
+
+  const results = [];
+  for (const id of ids) {
+    const p = rows.find((r) => r.id === id);
+    if (!p) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+    if (!p.image) { results.push({ id, ok: false, reason: 'no_image' }); continue; }
+
+    const imageUrl = fullImageUrl(p.image);
+    const caption = `*${p.name}*\nRp${Number(p.price || 0).toLocaleString('id-ID')}`;
+
+    try {
+      const sent = await waClient.sendImage({ phone: conv.phone, imageUrl, caption });
+      // Log to crm_messages so operator inbox shows it too
+      await pg.query(
+        `INSERT INTO crm_messages
+           (conversation_id, direction, sender_type, body, message_type, attachment_url, send_status, waha_message_id, ai_metadata)
+         VALUES ($1, 'out', 'ai', $2, 'image', $3, 'sent', $4, $5)`,
+        [conv.id, caption, imageUrl, sent.id || null, JSON.stringify({ tool: 'recommend_products', product_id: p.id })]
+      );
+      results.push({ id, ok: true, image_url: imageUrl });
+    } catch (err) {
+      results.push({ id, ok: false, error: err.message });
+    }
+  }
+
+  const sentCount = results.filter((r) => r.ok).length;
+  return {
+    sent_count: sentCount,
+    results,
+    note: sentCount > 0
+      ? `${sentCount} produk terkirim sebagai foto. Lanjutkan reply text untuk konfirmasi pilihan.`
+      : 'Tidak ada produk yang berhasil dikirim. Lanjut tanpa gambar.',
+  };
+}
+
 async function request_handover({ args, conv }) {
   const reason = String(args.reason || '').toLowerCase();
   if (!VALID_HANDOVER_REASONS.has(reason)) {
@@ -373,6 +448,7 @@ const executors = {
   build_order_form_url,
   find_customer_orders,
   get_order_status,
+  recommend_products,
   request_handover,
 };
 

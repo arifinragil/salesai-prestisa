@@ -5,5 +5,6 @@ function notImplemented() {
 module.exports = {
   name: 'metaCloud',
   sendText: notImplemented,
+  sendImage: notImplemented,
   parseInbound: notImplemented,
 };

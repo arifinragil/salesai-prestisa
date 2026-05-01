@@ -12,5 +12,6 @@ if (provider === 'waha') {
 module.exports = {
   provider: adapter.name,
   sendText: (opts) => adapter.sendText(opts),
+  sendImage: (opts) => adapter.sendImage(opts),
   parseInbound: (raw) => adapter.parseInbound(raw),
 };
