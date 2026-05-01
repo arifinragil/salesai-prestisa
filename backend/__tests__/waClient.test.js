@@ -55,4 +55,58 @@ describe('wahaAdapter.parseInbound (real)', () => {
     expect(out.type).toBe('media');
     expect(out.mediaUrl).toBe('https://x/y.jpg');
   });
+
+  describe('native WAHA event envelope', () => {
+    test('parses message event with text body', () => {
+      const out = waha.parseInbound({
+        event: 'message', session: 'finance0000',
+        payload: { id: 'false_628_3EB', from: '628123456789@c.us', fromMe: false, body: 'halo native', hasMedia: false },
+      });
+      expect(out.phone).toBe('628123456789');
+      expect(out.body).toBe('halo native');
+      expect(out.wahaMessageId).toBe('false_628_3EB');
+      expect(out.type).toBe('text');
+      expect(out.skip).toBeNull();
+    });
+
+    test('extracts body from message.conversation if root body missing', () => {
+      const out = waha.parseInbound({
+        event: 'message',
+        payload: { id: 'x', from: '628@c.us', fromMe: false, message: { conversation: 'nested halo' } },
+      });
+      expect(out.body).toBe('nested halo');
+    });
+
+    test('extracts body from extendedTextMessage', () => {
+      const out = waha.parseInbound({
+        event: 'message',
+        payload: { id: 'x', from: '628@c.us', fromMe: false, message: { extendedTextMessage: { text: 'halo ext' } } },
+      });
+      expect(out.body).toBe('halo ext');
+    });
+
+    test('skips fromMe (outbound echo)', () => {
+      const out = waha.parseInbound({
+        event: 'message', payload: { id: 'x', from: '628@c.us', fromMe: true, body: 'echo' },
+      });
+      expect(out.skip).toBe('fromMe');
+    });
+
+    test('skips non-message events', () => {
+      const out = waha.parseInbound({ event: 'session.status', payload: { status: 'WORKING' } });
+      expect(out.skip).toBe('event:session.status');
+    });
+
+    test('detects native media payload', () => {
+      const out = waha.parseInbound({
+        event: 'message',
+        payload: {
+          id: 'x', from: '628@c.us', fromMe: false, hasMedia: true,
+          media: { mimetype: 'image/jpeg', url: 'https://x/y.jpg' },
+        },
+      });
+      expect(out.type).toBe('image');
+      expect(out.mediaUrl).toBe('https://x/y.jpg');
+    });
+  });
 });

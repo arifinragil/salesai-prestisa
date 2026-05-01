@@ -36,9 +36,63 @@ async function sendText({ phone, text, replyTo }) {
 }
 
 // Normalize WAHA inbound webhook payload to canonical shape.
-// WAHA n8n forwarder typically posts:
-//   { wa_jid, push_name, body, waha_message_id, attachment_type, attachment_url, media_url, media_mimetype }
+// Supports two formats:
+//   1. Native WAHA webhook (NOWEB/WEBJS engines):
+//      { event: "message", session: "...", payload: { id, from, body, fromMe, hasMedia, ... } }
+//   2. n8n forwarder format (mitra-style):
+//      { wa_jid, push_name, body, waha_message_id, attachment_type, attachment_url, ... }
 function parseInbound(raw) {
+  // Detect native WAHA event envelope
+  if (raw && raw.event && raw.payload && typeof raw.payload === 'object') {
+    return parseNative(raw);
+  }
+  return parseForwarder(raw || {});
+}
+
+function parseNative(raw) {
+  const event = raw.event || '';
+  const p = raw.payload || {};
+  // Skip non-message events (status/ack/etc.) and outbound (fromMe)
+  if (!event.startsWith('message')) {
+    return { skip: `event:${event}`, phone: null, body: null };
+  }
+  if (p.fromMe) {
+    return { skip: 'fromMe', phone: null, body: null };
+  }
+
+  const jid = p.from || '';
+  const head = String(jid).split('@')[0];
+  const phone = head.replace(/\D/g, '') || null;
+  const isGroup = String(jid).endsWith('@g.us');
+  const isBroadcast = String(jid).endsWith('@broadcast');
+
+  // Body extraction — body is usually at root, sometimes nested in media
+  const body = p.body
+    || (typeof p.text === 'string' ? p.text : null)
+    || (p.message && p.message.conversation)
+    || (p.message && p.message.extendedTextMessage && p.message.extendedTextMessage.text)
+    || null;
+
+  const type = p.hasMedia
+    ? (p.media && p.media.mimetype ? p.media.mimetype.split('/')[0] : 'media')
+    : 'text';
+
+  const mediaUrl = (p.media && (p.media.url || p.media.link)) || null;
+  const mediaMime = (p.media && p.media.mimetype) || null;
+
+  return {
+    phone,
+    pushName: p.notifyName || p._data?.notifyName || null,
+    body,
+    wahaMessageId: p.id || null,
+    type,
+    mediaUrl,
+    mediaMime,
+    skip: isGroup ? 'group' : (isBroadcast ? 'broadcast' : null),
+  };
+}
+
+function parseForwarder(raw) {
   const jid = raw.wa_jid || raw.from || '';
   const head = String(jid).split('@')[0];
   const phone = head.replace(/\D/g, '') || null;
