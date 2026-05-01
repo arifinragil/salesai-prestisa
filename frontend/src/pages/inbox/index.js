@@ -15,11 +15,14 @@ const STATUS_FILTERS = [
 
 export default function InboxList() {
   const [status, setStatus] = useState('');
+  const [waSession, setWaSession] = useState('');
   const [search, setSearch] = useState('');
   const params = new URLSearchParams();
   if (status) params.set('status', status);
+  if (waSession) params.set('wa_session', waSession);
   if (search) params.set('search', search);
   const url = `/api/inbox/conversations${params.toString() ? '?' + params.toString() : ''}`;
+  const sessions = useSWR('/api/inbox/wa-sessions', fetcher, { refreshInterval: 60_000 });
 
   const { data, error, isLoading, mutate } = useSWR(url, fetcher, {
     refreshInterval: 15_000,
@@ -70,6 +73,18 @@ export default function InboxList() {
               </button>
             ))}
           </div>
+          {(sessions.data?.items || []).length > 0 && (
+            <select
+              value={waSession}
+              onChange={(e) => setWaSession(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:border-brand-500 bg-white"
+            >
+              <option value="">Semua nomor WA</option>
+              {sessions.data.items.map((s) => (
+                <option key={s.name} value={s.name}>{s.name} ({s.count})</option>
+              ))}
+            </select>
+          )}
         </div>
 
         {error && (

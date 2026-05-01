@@ -126,8 +126,8 @@ function parseNative(raw) {
     type,
     mediaUrl,
     mediaMime,
+    session: raw.session || null,
     // LID is acceptable as conversation key — WAHA understands LID for sendText routing.
-    // Customer just won't be linked to MySQL customer table (no LID lookup yet).
     skip: isGroup ? 'group' : (isBroadcast ? 'broadcast' : null),
   };
 }
@@ -148,6 +148,7 @@ function parseForwarder(raw) {
     type,
     mediaUrl: raw.attachment_url || raw.media_url || null,
     mediaMime: raw.media_mimetype || null,
+    session: raw.session || null,
     skip: isGroup ? 'group' : (isBroadcast ? 'broadcast' : null),
   };
 }

@@ -39,16 +39,18 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
 
     const resolved = await resolveByPhone(parsed.phone);
     const shadowDefault = !!(await settings.getSetting('shadow_mode_default', false));
+    const session = parsed.session || process.env.WAHA_SESSION || null;
 
     const convQ = await client.query(
-      `INSERT INTO crm_conversations (phone, customer_id, last_message_at, shadow_mode)
-       VALUES ($1, $2, now(), $3)
+      `INSERT INTO crm_conversations (phone, customer_id, last_message_at, shadow_mode, wa_session)
+       VALUES ($1, $2, now(), $3, $4)
        ON CONFLICT (phone) DO UPDATE SET
          last_message_at = now(),
          customer_id = COALESCE(crm_conversations.customer_id, EXCLUDED.customer_id),
+         wa_session = COALESCE(EXCLUDED.wa_session, crm_conversations.wa_session),
          updated_at = now()
-       RETURNING id, ai_enabled, ai_paused_until, status, shadow_mode`,
-      [parsed.phone, resolved.customer_id, shadowDefault]
+       RETURNING id, ai_enabled, ai_paused_until, status, shadow_mode, wa_session`,
+      [parsed.phone, resolved.customer_id, shadowDefault, session]
     );
     const conv = convQ.rows[0];
 

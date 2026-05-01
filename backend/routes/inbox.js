@@ -10,12 +10,17 @@ router.use(requireStaff);
 
 router.get('/conversations', async (req, res) => {
   const status = req.query.status;
+  const session = req.query.wa_session;
   const search = (req.query.search || '').toString().trim().toLowerCase();
   const params = [];
   const where = [];
   if (status && ['active', 'closed', 'spam'].includes(status)) {
     params.push(status);
     where.push(`conv.status = $${params.length}`);
+  }
+  if (session) {
+    params.push(session);
+    where.push(`conv.wa_session = $${params.length}`);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
@@ -31,7 +36,7 @@ router.get('/conversations', async (req, res) => {
     )
     SELECT conv.id, conv.phone, conv.customer_id, conv.status, conv.ai_enabled,
            conv.ai_paused_until, conv.assigned_staff_id, conv.last_message_at,
-           conv.last_intent, conv.handover_count, conv.shadow_mode,
+           conv.last_intent, conv.handover_count, conv.shadow_mode, conv.wa_session,
            lm.body AS last_body, lm.sender_type AS last_sender, lm.created_at AS last_at,
            COALESCE(ho.n, 0) AS open_handovers
     FROM crm_conversations conv
@@ -45,6 +50,18 @@ router.get('/conversations', async (req, res) => {
     ? rows.filter((r) => (r.phone || '').includes(search))
     : rows;
   res.json({ success: true, items });
+});
+
+// Distinct WAHA sessions seen in DB — used by inbox UI for filter dropdown
+router.get('/wa-sessions', async (_req, res) => {
+  const { rows } = await pg.query(
+    `SELECT wa_session AS name, COUNT(*)::int AS count
+     FROM crm_conversations
+     WHERE wa_session IS NOT NULL
+     GROUP BY wa_session
+     ORDER BY count DESC`
+  );
+  res.json({ success: true, items: rows });
 });
 
 router.get('/conversations/:id/messages', async (req, res) => {
