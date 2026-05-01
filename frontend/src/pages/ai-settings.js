@@ -5,6 +5,46 @@ import { fetcher, api } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { formatRelative } from '@/lib/format';
 
+function ModelPicker({ provider, value, placeholder, models, loading, onLoad, onChange }) {
+  const hasModels = Array.isArray(models);
+  return (
+    <div className="mb-2">
+      {!hasModels ? (
+        <button
+          type="button"
+          onClick={onLoad}
+          disabled={loading}
+          className="w-full px-2 py-1.5 text-sm border border-dashed border-slate-300 rounded text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {loading ? 'Loading…' : `Load ${provider} models from API`}
+        </button>
+      ) : (
+        <div className="flex gap-1">
+          <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-slate-200 rounded bg-white font-mono"
+          >
+            <option value="">— pakai default ({placeholder}) —</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>{m.id}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onLoad}
+            disabled={loading}
+            title="Refresh"
+            className="px-2 py-1.5 text-sm border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50"
+          >
+            ↻
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AiSettings() {
   const toast = useToast();
   const personas = useSWR('/api/admin/personas', fetcher);
@@ -25,6 +65,21 @@ export default function AiSettings() {
   const [openaiModel, setOpenaiModel] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState('');
+  const [models, setModels] = useState({}); // { anthropic: [...], openai: [...], gemini: [...] }
+  const [loadingModels, setLoadingModels] = useState({});
+
+  async function loadModels(provider) {
+    if (loadingModels[provider]) return;
+    setLoadingModels((s) => ({ ...s, [provider]: true }));
+    try {
+      const r = await api(`/api/admin/ai/models?provider=${provider}`);
+      setModels((s) => ({ ...s, [provider]: r.models || [] }));
+    } catch (e) {
+      toast.error(`Load ${provider} models: ${e.message}`);
+    } finally {
+      setLoadingModels((s) => ({ ...s, [provider]: false }));
+    }
+  }
 
   // Load full text of selected persona
   const personaDetail = useSWR(
@@ -177,12 +232,14 @@ export default function AiSettings() {
                 placeholder="sk-ant-... (kosongin = jangan ubah)"
                 className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
               />
-              <input
-                type="text"
+              <ModelPicker
+                provider="anthropic"
                 value={anthroModel}
-                onChange={(e) => setAnthroModel(e.target.value)}
                 placeholder={credentials?.anthropic?.model || 'claude-sonnet-4-6'}
-                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+                models={models.anthropic}
+                loading={loadingModels.anthropic}
+                onLoad={() => loadModels('anthropic')}
+                onChange={setAnthroModel}
               />
               <button
                 onClick={() => saveCredentials('anthropic', anthroKey, anthroModel)}
@@ -210,12 +267,14 @@ export default function AiSettings() {
                 placeholder="sk-... (kosongin = jangan ubah)"
                 className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
               />
-              <input
-                type="text"
+              <ModelPicker
+                provider="openai"
                 value={openaiModel}
-                onChange={(e) => setOpenaiModel(e.target.value)}
                 placeholder={credentials?.openai?.model || 'gpt-4o-mini'}
-                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+                models={models.openai}
+                loading={loadingModels.openai}
+                onLoad={() => loadModels('openai')}
+                onChange={setOpenaiModel}
               />
               <button
                 onClick={() => saveCredentials('openai', openaiKey, openaiModel)}
@@ -243,12 +302,14 @@ export default function AiSettings() {
                 placeholder="AIza... (kosongin = jangan ubah)"
                 className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
               />
-              <input
-                type="text"
+              <ModelPicker
+                provider="gemini"
                 value={geminiModel}
-                onChange={(e) => setGeminiModel(e.target.value)}
                 placeholder={credentials?.gemini?.model || 'gemini-2.5-pro'}
-                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+                models={models.gemini}
+                loading={loadingModels.gemini}
+                onLoad={() => loadModels('gemini')}
+                onChange={setGeminiModel}
               />
               <button
                 onClick={() => saveCredentials('gemini', geminiKey, geminiModel)}

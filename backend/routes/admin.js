@@ -43,6 +43,20 @@ router.get('/ai/provider', async (_req, res) => {
   res.json({ success: true, ...status, valid_providers: aiClient.VALID_PROVIDERS });
 });
 
+router.get('/ai/models', async (req, res) => {
+  const provider = String(req.query.provider || '').toLowerCase();
+  if (!aiClient.VALID_PROVIDERS.includes(provider)) {
+    return res.status(400).json({ success: false, message: `provider must be one of: ${aiClient.VALID_PROVIDERS.join(', ')}` });
+  }
+  try {
+    const out = await aiClient.listProviderModels(provider);
+    if (out.error) return res.status(502).json({ success: false, message: out.error });
+    res.json({ success: true, ...out });
+  } catch (err) {
+    res.status(502).json({ success: false, message: err.message });
+  }
+});
+
 router.put('/settings/:key', async (req, res) => {
   const key = req.params.key;
   if (!ALLOWED_SETTING_KEYS.has(key)) {
