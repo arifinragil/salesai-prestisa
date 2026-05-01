@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useState, useEffect } from 'react';
 import { useUser } from '@/lib/useUser';
 import { api } from '@/lib/api';
+import MessageSearch from './MessageSearch';
 
 const navItems = [
   { href: '/inbox',       label: 'Inbox' },
@@ -12,6 +14,19 @@ const navItems = [
 export default function Layout({ children, title = 'Tiara CRM' }) {
   const router = useRouter();
   const { user, isLoading, unauthenticated } = useUser({ redirectTo: '/login' });
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Cmd/Ctrl+K opens search globally
+  useEffect(() => {
+    function handler(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   async function logout() {
     try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
@@ -55,6 +70,14 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-xs text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50"
+            title="Cari pesan (Cmd/Ctrl+K)"
+          >
+            <span>🔍 Cari</span>
+            <kbd className="text-[10px] px-1 py-0.5 bg-slate-100 rounded border border-slate-200 text-slate-500">⌘K</kbd>
+          </button>
           <span className="text-slate-500">{user.username} ({user.role})</span>
           <a
             href="/admin/waha-sessions.html"
@@ -75,6 +98,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
         <title>{title}</title>
         {children}
       </main>
+      <MessageSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }

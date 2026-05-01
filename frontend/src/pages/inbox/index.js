@@ -1,9 +1,11 @@
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRouter } from 'next/router';
+import { useEffect, useState, useRef } from 'react';
 import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import { fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
+import { useNotifPermission, useNotificationSound, showBrowserNotification } from '@/lib/useNotifications';
 import { formatRelative, truncate, convStatusLabel, formatPhone } from '@/lib/format';
 
 const STATUS_FILTERS = [
@@ -14,9 +16,14 @@ const STATUS_FILTERS = [
 ];
 
 export default function InboxList() {
+  const router = useRouter();
   const [status, setStatus] = useState('');
   const [waSession, setWaSession] = useState('');
   const [search, setSearch] = useState('');
+  const playSound = useNotificationSound();
+  const notif = useNotifPermission();
+  const seenConvIds = useRef(new Set());
+  const firstLoadRef = useRef(true);
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (waSession) params.set('wa_session', waSession);
@@ -32,20 +39,64 @@ export default function InboxList() {
   // Live update on inbox events — re-fetch the list
   useSocket(
     {
-      'crm:conv-updated': () => mutate(),
-      'crm:handover':     () => mutate(),
+      'crm:conv-updated': (payload) => {
+        mutate();
+        // Sound + notification only after initial render and only for non-self triggers
+        if (!firstLoadRef.current && payload?.conversation_id) {
+          const isNewConv = !seenConvIds.current.has(payload.conversation_id);
+          if (isNewConv) {
+            playSound({ frequency: 720, duration: 0.18 });
+            showBrowserNotification({
+              title: 'Pesan baru di inbox',
+              body: `Conv #${payload.conversation_id}`,
+              tag: `conv-${payload.conversation_id}`,
+              onClick: () => router.push(`/inbox/${payload.conversation_id}`),
+            });
+          }
+          seenConvIds.current.add(payload.conversation_id);
+        }
+      },
+      'crm:handover': (payload) => {
+        mutate();
+        if (!firstLoadRef.current) {
+          playSound({ frequency: 440, duration: 0.32, type: 'square' });
+          showBrowserNotification({
+            title: '⚠️ Handover butuh operator',
+            body: `${payload?.reason || 'tool_error'} · ${payload?.summary?.slice(0, 80) || ''}`,
+            tag: `ho-${payload?.conversation_id || ''}`,
+            onClick: () => router.push(`/inbox/${payload?.conversation_id}`),
+          });
+        }
+      },
     },
     { joinRooms: [{ event: 'crm:join-inbox' }] }
   );
 
   const items = data?.items || [];
 
+  // Track seen conv IDs so we know what's "new" on subsequent updates
+  useEffect(() => {
+    if (data?.items) {
+      data.items.forEach((c) => seenConvIds.current.add(c.id));
+      firstLoadRef.current = false;
+    }
+  }, [data?.items]);
+
   return (
     <Layout title="Inbox — Tiara">
       <div className="max-w-5xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-semibold text-slate-800">Inbox</h1>
-          <div className="text-xs text-slate-500">
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            {notif.supported && notif.state !== 'granted' && (
+              <button
+                onClick={notif.request}
+                className="text-xs px-2.5 py-1 rounded-md text-brand-700 border border-brand-200 bg-brand-50 hover:bg-brand-100"
+                title="Aktifkan notifikasi browser untuk pesan baru"
+              >
+                🔔 Enable notif
+              </button>
+            )}
             {isLoading ? 'Loading…' : `${items.length} percakapan`}
           </div>
         </div>

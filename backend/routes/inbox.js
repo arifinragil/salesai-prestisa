@@ -69,6 +69,67 @@ router.get('/wa-sessions', async (_req, res) => {
   res.json({ success: true, items: rows });
 });
 
+// Search across all messages (and customer phones) — operator-wide.
+router.get('/messages/search', async (req, res) => {
+  const q = (req.query.q || '').toString().trim();
+  if (q.length < 2) return res.status(400).json({ success: false, message: 'q minimum 2 chars' });
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+
+  const { rows } = await pg.query(
+    `SELECT m.id, m.created_at, m.direction, m.sender_type, m.body,
+            c.id AS conversation_id, c.phone, c.customer_id
+     FROM crm_messages m
+     JOIN crm_conversations c ON c.id = m.conversation_id
+     WHERE m.body ILIKE $1 OR c.phone ILIKE $1
+     ORDER BY m.id DESC
+     LIMIT $2`,
+    [`%${q}%`, limit]
+  );
+  res.json({ success: true, query: q, count: rows.length, results: rows });
+});
+
+// CSV export of full conversation transcript
+router.get('/conversations/:id/export.csv', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const c = await pg.query(`SELECT phone FROM crm_conversations WHERE id = $1`, [id]);
+  if (!c.rows[0]) return res.status(404).json({ success: false, message: 'not found' });
+
+  const { rows } = await pg.query(
+    `SELECT id, created_at, direction, sender_type, staff_id, body, message_type,
+            attachment_url, send_status,
+            ai_metadata->>'provider' AS ai_provider,
+            ai_metadata->>'model' AS ai_model,
+            ai_metadata->>'tools_called' AS ai_tools
+     FROM crm_messages WHERE conversation_id = $1 ORDER BY id ASC`,
+    [id]
+  );
+
+  function csvEscape(v) {
+    if (v == null) return '';
+    const s = typeof v === 'string' ? v : String(v);
+    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  const header = ['id', 'timestamp', 'direction', 'sender_type', 'staff_id', 'message_type',
+    'body', 'attachment_url', 'send_status', 'ai_provider', 'ai_model', 'ai_tools'];
+  const lines = [header.join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.id,
+      r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+      r.direction, r.sender_type, r.staff_id || '', r.message_type || 'text',
+      csvEscape(r.body), r.attachment_url || '', r.send_status || '',
+      r.ai_provider || '', r.ai_model || '', r.ai_tools || '',
+    ].join(','));
+  }
+  const csv = lines.join('\n') + '\n';
+  const phone = c.rows[0].phone.replace(/[^a-zA-Z0-9]/g, '');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="conv-${id}-${phone}.csv"`);
+  res.send(csv);
+});
+
 router.get('/conversations/:id/messages', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });

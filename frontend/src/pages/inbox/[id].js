@@ -195,6 +195,14 @@ export default function ChatDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <a
+              href={`/api/inbox/conversations/${id}/export.csv`}
+              className="text-xs px-3 py-1.5 rounded-md text-slate-600 border border-slate-200 bg-white hover:bg-slate-50"
+              title="Download transcript (CSV)"
+              download
+            >
+              ⬇ CSV
+            </a>
             <button
               onClick={summarizeChat}
               disabled={summaryLoading}

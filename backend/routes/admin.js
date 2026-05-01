@@ -156,6 +156,11 @@ router.get('/cost/today', async (_req, res) => {
   res.json({ success: true, ...r });
 });
 
+router.get('/cost/breakdown', async (_req, res) => {
+  const r = await costGuard.getTodayBreakdown();
+  res.json({ success: true, ...r });
+});
+
 // ── Persona ──────────────────────────────────────────────────────────────────
 
 router.get('/personas', async (_req, res) => {

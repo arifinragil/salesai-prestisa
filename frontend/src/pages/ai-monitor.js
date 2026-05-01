@@ -27,6 +27,7 @@ export default function AiMonitor() {
   const toast = useToast();
   const today = useSWR('/api/admin/metrics/today', fetcher, { refreshInterval: 10_000 });
   const cost = useSWR('/api/admin/cost/today', fetcher, { refreshInterval: 10_000 });
+  const costBreakdown = useSWR('/api/admin/cost/breakdown', fetcher, { refreshInterval: 30_000 });
   const breakdown = useSWR('/api/admin/metrics/handover-breakdown?days=7', fetcher, { refreshInterval: 60_000 });
   const recent = useSWR('/api/admin/metrics/recent', fetcher, { refreshInterval: 60_000 });
   const handovers = useSWR('/api/inbox/handovers?open=true', fetcher, { refreshInterval: 15_000 });
@@ -110,6 +111,51 @@ export default function AiMonitor() {
             <div className="text-xs text-rose-600 mt-2">
               ⚠ Cap reached — AI auto-handover sampai 00:00 UTC.
             </div>
+          )}
+        </div>
+
+        {/* Cost breakdown per provider/model */}
+        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Cost breakdown — provider × model</h2>
+            <span className="text-xs text-slate-400">today UTC</span>
+          </div>
+          {(costBreakdown.data?.breakdown || []).length === 0 ? (
+            <div className="text-sm text-slate-400 px-5 py-6">Belum ada AI activity hari ini.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th className="px-4 py-2 text-left">Provider</th>
+                  <th className="px-4 py-2 text-left">Model</th>
+                  <th className="px-4 py-2 text-right">Pesan</th>
+                  <th className="px-4 py-2 text-right">Tokens in</th>
+                  <th className="px-4 py-2 text-right">Tokens out</th>
+                  <th className="px-4 py-2 text-right">Cost (USD)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(costBreakdown.data?.breakdown || []).map((r, i) => (
+                  <tr key={`${r.provider}-${r.model}-${i}`} className="hover:bg-slate-50">
+                    <td className="px-4 py-2 capitalize">{r.provider}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{r.model}</td>
+                    <td className="px-4 py-2 text-right">{r.messages}</td>
+                    <td className="px-4 py-2 text-right text-slate-500">{r.tokens_in.toLocaleString('id-ID')}</td>
+                    <td className="px-4 py-2 text-right text-slate-500">{r.tokens_out.toLocaleString('id-ID')}</td>
+                    <td className="px-4 py-2 text-right font-medium">${r.cost_usd.toFixed(4)}</td>
+                  </tr>
+                ))}
+                {costBreakdown.data?.total && (
+                  <tr className="bg-slate-50 font-semibold">
+                    <td className="px-4 py-2" colSpan={2}>Total</td>
+                    <td className="px-4 py-2 text-right">{costBreakdown.data.total.messages}</td>
+                    <td className="px-4 py-2 text-right">{costBreakdown.data.total.tokens_in.toLocaleString('id-ID')}</td>
+                    <td className="px-4 py-2 text-right">{costBreakdown.data.total.tokens_out.toLocaleString('id-ID')}</td>
+                    <td className="px-4 py-2 text-right">${costBreakdown.data.total.cost_usd.toFixed(4)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           )}
         </div>
 
