@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import useSWR from 'swr';
-import { fetcher } from '@/lib/api';
+import { fetcher, api } from '@/lib/api';
+import { useToast } from '@/components/Toast';
 import { formatRupiah, formatRelative, formatPhone } from '@/lib/format';
 
 const STATUS_COLOR = {
@@ -21,11 +23,37 @@ function StatusPill({ s }) {
 }
 
 export default function CustomerPanel({ convId }) {
-  const { data, error, isLoading } = useSWR(
+  const toast = useToast();
+  const { data, error, isLoading, mutate } = useSWR(
     convId ? `/api/inbox/conversations/${convId}/customer` : null,
     fetcher,
     { refreshInterval: 60_000 }
   );
+  const [phoneInput, setPhoneInput] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
+
+  async function savePhone() {
+    setSavingPhone(true);
+    try {
+      const r = await api(`/api/inbox/conversations/${convId}/set-phone`, {
+        method: 'POST',
+        body: { phone: phoneInput },
+      });
+      if (r.linked) {
+        toast.success(`Nomor disimpan & terhubung ke customer #${r.customer_id}`);
+      } else if (r.real_phone) {
+        toast.success('Nomor disimpan (tidak match customer manapun)');
+      } else {
+        toast.success('Nomor di-clear');
+      }
+      setPhoneInput('');
+      mutate();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingPhone(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -54,15 +82,57 @@ export default function CustomerPanel({ convId }) {
           </div>
           <div className="bg-white rounded-md border border-slate-200 p-3 space-y-1">
             <div className="text-sm font-medium text-slate-800">
-              {p.name || <span className="text-slate-400">— belum terhubung</span>}
+              {p.name || p.push_name || <span className="text-slate-400">— belum terhubung</span>}
             </div>
-            <div className="text-xs text-slate-500 font-mono">{formatPhone(p.phone)}</div>
+            <div className="text-xs text-slate-500 font-mono">
+              {formatPhone(p.real_phone || p.phone)}
+            </div>
+            {p.is_lid && p.real_phone && (
+              <div className="text-[10px] text-slate-400">via {formatPhone(p.phone)}</div>
+            )}
             {p.email && <div className="text-xs text-slate-500 truncate" title={p.email}>{p.email}</div>}
             {p.customer_id && (
               <div className="text-[10px] text-slate-400 mt-1">customer_id #{p.customer_id}</div>
             )}
           </div>
         </section>
+
+        {/* Manual phone entry for LID-locked conversations */}
+        {p.is_lid && (
+          <section className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
+            <div className="text-[10px] font-semibold text-amber-800 uppercase tracking-wider">
+              Set nomor asli
+            </div>
+            <div className="text-xs text-amber-900">
+              {p.push_name && <div className="mb-1">WhatsApp name: <strong>{p.push_name}</strong></div>}
+              Customer pakai privacy mode (LID). Tanya nomor mereka, masukkan di sini supaya bisa lookup ke profile customer.
+            </div>
+            <div className="flex gap-1.5">
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                placeholder={p.real_phone || '0812... atau 628...'}
+                className="flex-1 min-w-0 px-2 py-1 text-xs border border-amber-300 rounded font-mono"
+              />
+              <button
+                onClick={savePhone}
+                disabled={savingPhone}
+                className="text-xs px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {savingPhone ? '…' : (p.real_phone ? 'Update' : 'Set')}
+              </button>
+            </div>
+            {p.real_phone && (
+              <button
+                onClick={() => { setPhoneInput(''); savePhone(); }}
+                className="text-[10px] text-amber-600 hover:text-amber-800 underline"
+              >
+                Clear nomor manual
+              </button>
+            )}
+          </section>
+        )}
 
         {p.customer_id ? (
           <section>
@@ -80,7 +150,7 @@ export default function CustomerPanel({ convId }) {
               </div>
             </div>
           </section>
-        ) : (
+        ) : !p.is_lid && (
           <section className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800">
             Phone tidak match dengan customer manapun di Prestisa DB.
           </section>

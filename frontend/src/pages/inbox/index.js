@@ -163,8 +163,13 @@ export default function InboxList() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-sm text-slate-800">
-                            {formatPhone(conv.phone)}
+                            {formatPhone(conv.real_phone || conv.phone)}
                           </span>
+                          {conv.push_name && (
+                            <span className="text-xs text-slate-500 truncate max-w-[120px]" title={conv.push_name}>
+                              {conv.push_name}
+                            </span>
+                          )}
                           <span className={`status-pill ${status.cls}`}>
                             {status.label}
                           </span>

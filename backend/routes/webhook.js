@@ -42,15 +42,16 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     const session = parsed.session || process.env.WAHA_SESSION || null;
 
     const convQ = await client.query(
-      `INSERT INTO crm_conversations (phone, customer_id, last_message_at, shadow_mode, wa_session)
-       VALUES ($1, $2, now(), $3, $4)
+      `INSERT INTO crm_conversations (phone, customer_id, last_message_at, shadow_mode, wa_session, push_name)
+       VALUES ($1, $2, now(), $3, $4, $5)
        ON CONFLICT (phone) DO UPDATE SET
          last_message_at = now(),
          customer_id = COALESCE(crm_conversations.customer_id, EXCLUDED.customer_id),
          wa_session = COALESCE(EXCLUDED.wa_session, crm_conversations.wa_session),
+         push_name = COALESCE(EXCLUDED.push_name, crm_conversations.push_name),
          updated_at = now()
        RETURNING id, ai_enabled, ai_paused_until, status, shadow_mode, wa_session`,
-      [parsed.phone, resolved.customer_id, shadowDefault, session]
+      [parsed.phone, resolved.customer_id, shadowDefault, session, parsed.pushName || null]
     );
     const conv = convQ.rows[0];
 

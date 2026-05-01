@@ -39,7 +39,8 @@ router.get('/conversations', async (req, res) => {
       SELECT conversation_id, COUNT(*)::int AS n
       FROM crm_handovers WHERE resolved_at IS NULL GROUP BY conversation_id
     )
-    SELECT conv.id, conv.phone, conv.customer_id, conv.status, conv.ai_enabled,
+    SELECT conv.id, conv.phone, conv.real_phone, conv.push_name,
+           conv.customer_id, conv.status, conv.ai_enabled,
            conv.ai_paused_until, conv.assigned_staff_id, conv.last_message_at,
            conv.last_intent, conv.handover_count, conv.shadow_mode, conv.wa_session,
            lm.body AS last_body, lm.sender_type AS last_sender, lm.created_at AS last_at,
@@ -259,6 +260,42 @@ router.post('/conversations/:id/close', async (req, res) => {
   res.json({ success: true });
 });
 
+// Set the operator-entered real phone for LID-locked conversations.
+// Triggers customer lookup so the conv links to MySQL customer profile.
+router.post('/conversations/:id/set-phone', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+
+  const raw = (req.body?.phone || '').toString().trim();
+  // Normalize: strip all non-digits, accept Indonesian formats (0xxx, 8xxx, 62xxx, +62xxx)
+  let phone = raw.replace(/\D/g, '');
+  if (!phone) {
+    // empty = clear the override
+    await pg.query(`UPDATE crm_conversations SET real_phone = NULL, customer_id = NULL WHERE id = $1`, [id]);
+    return res.json({ success: true, real_phone: null, customer_id: null });
+  }
+  if (phone.startsWith('0')) phone = '62' + phone.slice(1);
+  else if (phone.startsWith('8')) phone = '62' + phone;
+  if (phone.length < 10 || phone.length > 16) {
+    return res.status(400).json({ success: false, message: 'phone harus 10-16 digit' });
+  }
+
+  // Resolve to MySQL customer
+  let customerId = null;
+  try {
+    const r = await resolveByPhone(phone);
+    customerId = r.customer_id;
+  } catch (err) {
+    logger.warn({ err: err.message }, '[set-phone] resolve failed');
+  }
+
+  await pg.query(
+    `UPDATE crm_conversations SET real_phone = $2, customer_id = $3, updated_at = now() WHERE id = $1`,
+    [id, phone, customerId]
+  );
+  res.json({ success: true, real_phone: phone, customer_id: customerId, linked: !!customerId });
+});
+
 router.post('/conversations/:id/reopen', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
@@ -293,15 +330,33 @@ router.get('/conversations/:id/customer', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
   const { rows } = await pg.query(
-    `SELECT id, phone, customer_id, last_message_at, last_intent,
+    `SELECT id, phone, real_phone, push_name, customer_id, last_message_at, last_intent,
             handover_count, status, shadow_mode, wa_session
      FROM crm_conversations WHERE id = $1`, [id]
   );
   const conv = rows[0];
   if (!conv) return res.status(404).json({ success: false, message: 'not found' });
 
-  const profile = { phone: conv.phone, customer_id: conv.customer_id, name: null,
-    email: null, total_orders: 0, total_spent: 0, recent_orders: [] };
+  const isLid = String(conv.phone).endsWith('@lid');
+  const lookupPhone = conv.real_phone || (isLid ? null : conv.phone);
+
+  // Auto-resolve customer_id from real_phone if not set yet
+  if (!conv.customer_id && lookupPhone) {
+    try {
+      const r = await resolveByPhone(lookupPhone);
+      if (r.customer_id) {
+        await pg.query(`UPDATE crm_conversations SET customer_id = $2 WHERE id = $1`, [id, r.customer_id]);
+        conv.customer_id = r.customer_id;
+      }
+    } catch {}
+  }
+
+  const profile = {
+    phone: conv.phone, real_phone: conv.real_phone || null,
+    push_name: conv.push_name, is_lid: isLid,
+    customer_id: conv.customer_id, name: null,
+    email: null, total_orders: 0, total_spent: 0, recent_orders: [],
+  };
 
   if (conv.customer_id) {
     try {

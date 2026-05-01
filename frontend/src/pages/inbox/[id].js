@@ -182,11 +182,13 @@ export default function ChatDetail() {
             <div className="min-w-0 sm:flex-1">
               <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                 <span className="font-semibold text-slate-800 text-sm sm:text-base break-all">
-                  {convData ? formatPhone(convData.phone) : id}
+                  {convData ? formatPhone(convData.real_phone || convData.phone) : id}
                 </span>
                 {status && <span className={`status-pill ${status.cls}`}>{status.label}</span>}
-                {convData?.phone?.endsWith?.('@lid') && (
-                  <span className="text-[10px] text-slate-400" title={convData.phone}>LID</span>
+                {convData?.phone?.endsWith?.('@lid') && !convData?.real_phone && (
+                  <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded border border-amber-200" title={convData.phone}>
+                    LID — set nomor di sidebar
+                  </span>
                 )}
                 {convData?.last_intent && (
                   <span className="text-[10px] text-slate-400 hidden sm:inline">· {convData.last_intent}</span>
