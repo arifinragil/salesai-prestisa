@@ -116,11 +116,12 @@ async function processOne() {
     job = await claimNextJob(client, workerId);
     if (!job) {
       await client.query('COMMIT');
+      client.release();
       return { ok: true, idle: true };
     }
     await client.query('COMMIT');
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch {}
     client.release();
     logger.error({ err: err.message }, '[aiAgent] claim failed');
     return { ok: false, error: err.message };
