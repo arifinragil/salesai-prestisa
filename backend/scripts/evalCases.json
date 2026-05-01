@@ -1,0 +1,22 @@
+[
+  { "id": 1,  "input": "halo, mau pesan papan bunga buat di Jogja",         "expect": { "intent": "order_intent",   "handover": false } },
+  { "id": 2,  "input": "kapan barang saya sampai? PO 12345",                "expect": { "intent": "order_status",   "handover": false } },
+  { "id": 3,  "input": "berapa harga bouquet untuk anniversary?",           "expect": { "intent": "pricing",        "handover": false, "tool_called": "search_products" } },
+  { "id": 4,  "input": "ongkir ke surabaya berapa?",                        "expect": { "intent": "shipping",       "handover": false, "tool_called": "get_shipping_info" } },
+  { "id": 5,  "input": "VA saya expired, gimana?",                          "expect": { "intent": "payment",        "handover": false } },
+  { "id": 6,  "input": "saya kecewa banget, papan saya layu duluan",        "expect": { "intent": "complaint",      "handover": true } },
+  { "id": 7,  "input": "minta refund dong, gak puas",                       "expect": { "intent": "refund",         "handover": true } },
+  { "id": 8,  "input": "tolong cancel order saya",                          "expect": { "intent": "cancel",         "handover": true } },
+  { "id": 9,  "input": "ngomong sama orang dong, jangan bot",               "expect": { "intent": "explicit_request_human", "handover": true } },
+  { "id": 10, "input": "panggilin admin saya mau komplain",                 "expect": { "intent": "explicit_request_human", "handover": true } },
+  { "id": 11, "input": "jam buka prestisa kapan ya?",                       "expect": { "intent": "faq",            "handover": false } },
+  { "id": 12, "input": "cara order gimana?",                                "expect": { "intent": "faq",            "handover": false } },
+  { "id": 13, "input": "ada promo bulan ini?",                              "expect": { "intent": "pricing",        "handover": false, "tool_called": "get_active_promos" } },
+  { "id": 14, "input": "papan duka cita di bandung",                        "expect": { "intent": "order_intent",   "handover": false, "tool_called": "search_products" } },
+  { "id": 15, "input": "saya mau lapor ke polisi kalau gak diurus",         "expect": { "intent": "legal",          "handover": true } },
+  { "id": 16, "input": "WTF marah banget gw layanan kalian busuk",          "expect": { "intent": "angry",          "handover": true } },
+  { "id": 17, "input": "boleh kirim 14 feb ke depok? cake ulang tahun",     "expect": { "intent": "order_intent",   "handover": false } },
+  { "id": 18, "input": "invoice saya belum sampai email",                   "expect": { "intent": "faq",            "handover": false } },
+  { "id": 19, "input": "thanks ya kak",                                     "expect": { "intent": "other",          "handover": false } },
+  { "id": 20, "input": "halo",                                              "expect": { "intent": "other",          "handover": false } }
+]
