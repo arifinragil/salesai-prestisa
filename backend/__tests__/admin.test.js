@@ -30,7 +30,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Drop test personas first (one of them may currently be active),
+  // then restore tiara_v1 to active. Order matters because of the
+  // partial unique index on (active = TRUE).
   await pg.query(`DELETE FROM crm_persona_prompts WHERE name LIKE 'test_v%'`);
+  await pg.query(`UPDATE crm_persona_prompts SET active = TRUE WHERE name = 'tiara_v1'`);
   await pg.query(`DELETE FROM staff_users WHERE id = $1`, [staffId]);
   await pg.end();
 });
