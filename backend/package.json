@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "migrate": "node db/migrate.js",
+    "seed:staff": "node db/seedStaff.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "rollup:metrics": "node scripts/dailyMetricsRollup.js",
