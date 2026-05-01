@@ -80,6 +80,39 @@ const declarations = [
     },
   },
   {
+    name: 'find_customer_orders',
+    description: 'Daftar order terbaru milik customer ini. Customer_id auto-scoped, JANGAN minta dari user. Return max 20.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', description: 'Jumlah max (default 5, max 20).' },
+      },
+    },
+  },
+  {
+    name: 'get_order_status',
+    description: 'Detail status 1 order (header, items dengan PO status, ETA). Pakai setelah find_customer_orders memberi order_id. Customer_id auto-scoped.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        order_id: { type: 'integer', description: 'ID internal order.' },
+      },
+      required: ['order_id'],
+    },
+  },
+  {
+    name: 'request_handover',
+    description: 'Eskalasi ke operator manusia. Pakai untuk: complaint, refund, cancel, pricing-custom, low-confidence, atau saat customer minta orang. Setelah ini AI pause 24 jam di percakapan ini.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', enum: ['complaint', 'refund', 'cancel', 'custom_price', 'explicit_request_human', 'low_confidence', 'tool_error', 'other'] },
+        summary: { type: 'string', description: 'Ringkasan singkat untuk operator (1-2 kalimat).' },
+      },
+      required: ['reason', 'summary'],
+    },
+  },
+  {
     name: 'build_order_form_url',
     description: 'Bangun URL form order prefilled dengan data customer. Pakai ini sebagai langkah closing — link akan dibuka customer untuk verifikasi & bayar.',
     input_schema: {
@@ -246,6 +279,82 @@ function build_order_form_url({ args, phone }) {
   return { url: `${base}?${params.toString()}` };
 }
 
+const VALID_HANDOVER_REASONS = new Set([
+  'complaint', 'refund', 'cancel', 'custom_price',
+  'explicit_request_human', 'low_confidence', 'tool_error', 'other',
+]);
+
+async function find_customer_orders({ args, customer_id }) {
+  if (!customer_id) {
+    return { count: 0, orders: [], note: 'Customer ini belum terhubung ke akun Prestisa. Tanya nomor order langsung atau handover.' };
+  }
+  const limit = clampInt(args.limit, 5, 20);
+  const sql = `
+    SELECT id AS order_id, order_number, total, status, created_at
+    FROM \`order\`
+    WHERE customer_id = ? AND deleted_at IS NULL
+    ORDER BY id DESC
+    LIMIT ${limit}`;
+  const [rows] = await mysql.query(sql, [customer_id]);
+  return { count: rows.length, orders: rows };
+}
+
+async function get_order_status({ args, customer_id }) {
+  const orderId = parseInt(args.order_id);
+  if (!orderId) return { error: 'order_id wajib diisi' };
+  if (!customer_id) return { error: 'Customer ini belum terhubung ke akun Prestisa.' };
+
+  const [orders] = await mysql.query(
+    `SELECT id, order_number, status, total, created_at
+     FROM \`order\`
+     WHERE id = ? AND customer_id = ? AND deleted_at IS NULL LIMIT 1`,
+    [orderId, customer_id]
+  );
+  if (!orders.length) return { error: `order_id ${orderId} tidak ditemukan untuk customer ini` };
+  const order = orders[0];
+
+  const [items] = await mysql.query(
+    `SELECT oi.id, oi.product_name, oi.qty, oi.price, oi.status,
+            po.status AS purchase_order_status
+     FROM order_items oi
+     LEFT JOIN purchase_order po ON po.id = oi.purchase_order_id
+     WHERE oi.order_id = ? AND oi.deleted_at IS NULL
+     LIMIT 30`,
+    [orderId]
+  );
+  return {
+    order_id: order.id,
+    order_number: order.order_number,
+    status: order.status,
+    total: order.total,
+    created_at: order.created_at,
+    items,
+    eta_text: '3-6 jam setelah pembayaran terkonfirmasi (untuk item yang belum dikirim)',
+  };
+}
+
+async function request_handover({ args, conv }) {
+  const reason = String(args.reason || '').toLowerCase();
+  if (!VALID_HANDOVER_REASONS.has(reason)) {
+    return { error: `reason "${reason}" tidak valid. Valid: ${Array.from(VALID_HANDOVER_REASONS).join(', ')}` };
+  }
+  const summary = String(args.summary || '').slice(0, 1000);
+
+  const ins = await pg.query(
+    `INSERT INTO crm_handovers (conversation_id, reason, detail) VALUES ($1, $2, $3) RETURNING id`,
+    [conv.id, reason, summary]
+  );
+  await pg.query(
+    `UPDATE crm_conversations
+       SET ai_paused_until = now() + INTERVAL '24 hours',
+           handover_count = handover_count + 1,
+           updated_at = now()
+     WHERE id = $1`,
+    [conv.id]
+  );
+  return { ok: true, handover_id: ins.rows[0].id, paused_for_hours: 24 };
+}
+
 const executors = {
   search_products,
   list_categories,
@@ -253,6 +362,9 @@ const executors = {
   get_active_promos,
   get_faq,
   build_order_form_url,
+  find_customer_orders,
+  get_order_status,
+  request_handover,
 };
 
 module.exports = { declarations, executors, clampInt };
