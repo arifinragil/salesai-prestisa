@@ -23,6 +23,8 @@ export default function AiSettings() {
   const [anthroModel, setAnthroModel] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [openaiModel, setOpenaiModel] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('');
 
   // Load full text of selected persona
   const personaDetail = useSWR(
@@ -109,6 +111,7 @@ export default function AiSettings() {
       // Clear input fields after save
       if (provider === 'anthropic') { setAnthroKey(''); setAnthroModel(''); }
       if (provider === 'openai')    { setOpenaiKey(''); setOpenaiModel(''); }
+      if (provider === 'gemini')    { setGeminiKey(''); setGeminiModel(''); }
     } catch (e) { toast.error(e.message); }
   }
 
@@ -156,7 +159,7 @@ export default function AiSettings() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             {/* Anthropic */}
             <div className="border border-slate-200 rounded-md p-3">
               <div className="flex items-center justify-between mb-2">
@@ -221,6 +224,42 @@ export default function AiSettings() {
               >
                 Save
               </button>
+            </div>
+
+            {/* Gemini */}
+            <div className="border border-slate-200 rounded-md p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium text-slate-700 text-sm">Google Gemini</div>
+                {credentials?.gemini?.api_key_set && (
+                  <span className="text-xs text-emerald-600" title={credentials.gemini.api_key_preview}>
+                    ✓ {credentials.gemini.api_key_preview}
+                  </span>
+                )}
+              </div>
+              <input
+                type="password"
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                placeholder="AIza... (kosongin = jangan ubah)"
+                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+              />
+              <input
+                type="text"
+                value={geminiModel}
+                onChange={(e) => setGeminiModel(e.target.value)}
+                placeholder={credentials?.gemini?.model || 'gemini-2.5-pro'}
+                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+              />
+              <button
+                onClick={() => saveCredentials('gemini', geminiKey, geminiModel)}
+                disabled={!geminiKey && !geminiModel}
+                className="text-sm px-3 py-1.5 rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-40"
+              >
+                Save
+              </button>
+              <div className="text-xs text-slate-400 mt-2">
+                Note: classifier juga pakai key Gemini (env). Untuk reply, key ini boleh sama atau beda.
+              </div>
             </div>
           </div>
         </div>

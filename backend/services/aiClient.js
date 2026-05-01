@@ -5,8 +5,9 @@
 const settings = require('./settings');
 const claude = require('./claudeClient');
 const openai = require('./openaiClient');
+const gemini = require('./geminiReplyClient');
 
-const VALID_PROVIDERS = ['anthropic', 'openai'];
+const VALID_PROVIDERS = ['anthropic', 'openai', 'gemini'];
 
 async function getActiveProvider() {
   const v = await settings.getSetting('reply_provider', null);
@@ -27,6 +28,12 @@ async function getProviderConfig(provider) {
     return {
       apiKey: fromDb.api_key || process.env.OPENAI_API_KEY || '',
       model: fromDb.model || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    };
+  }
+  if (provider === 'gemini') {
+    return {
+      apiKey: fromDb.api_key || process.env.GEMINI_API_KEY || '',
+      model: fromDb.model || process.env.GEMINI_REPLY_MODEL || 'gemini-2.5-pro',
     };
   }
   throw new Error(`unknown provider: ${provider}`);
@@ -52,6 +59,7 @@ async function generateWithTools(opts) {
       if (prevModel === undefined) delete process.env.CLAUDE_MODEL; else process.env.CLAUDE_MODEL = prevModel;
     }
   }
+  if (provider === 'gemini') return gemini.generateWithTools({ ...opts, providerConfig });
   return openai.generateWithTools({ ...opts, providerConfig });
 }
 
