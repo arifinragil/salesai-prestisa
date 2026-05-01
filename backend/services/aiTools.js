@@ -23,7 +23,7 @@ function clampInt(v, def, max) {
 const declarations = [
   {
     name: 'search_products',
-    description: 'Cari produk dari katalog Prestisa. Filter optional: category (nama kategori), city (kota tujuan), budget_min/budget_max (rupiah, integer), query (free-text matching nama produk). Return max 5 produk dengan id, name, category, price, city, image_url, description. WAJIB pakai tool ini sebelum menyebut harga atau menawarkan produk.',
+    description: 'Cari produk dari katalog Prestisa. Filter optional: category, city (kota tujuan), budget_min/budget_max (rupiah, integer), query (free-text), limit (max 10, default 5). Return diurutkan top-seller dulu (item_sold DESC) lalu rating. WAJIB pakai tool ini sebelum menyebut harga atau menawarkan produk.',
     input_schema: {
       type: 'object',
       properties: {
@@ -32,6 +32,7 @@ const declarations = [
         budget_min: { type: 'integer', description: 'Budget minimum dalam rupiah.' },
         budget_max: { type: 'integer', description: 'Budget maksimum dalam rupiah.' },
         query:      { type: 'string', description: 'Kata kunci nama produk.' },
+        limit:      { type: 'integer', description: 'Jumlah produk yang dikembalikan (default 5, max 10).' },
       },
     },
   },
@@ -141,7 +142,7 @@ const declarations = [
 // ── Executors ────────────────────────────────────────────────────────────────
 
 async function search_products({ args }) {
-  const limit = 5;
+  const limit = clampInt(args.limit, 5, 10);
   const where = ['p.deleted_at IS NULL', 'p.price > 0'];
   const params = [];
 
@@ -170,11 +171,11 @@ async function search_products({ args }) {
 
   const sql = `
     SELECT p.id, p.name, COALESCE(c.name, '?') AS category,
-           p.price, p.image AS image_url, p.description
+           p.price, p.image AS image_url, p.description, p.item_sold, p.rating
     FROM products p
     LEFT JOIN product_category_new c ON c.id = p.category_id
     WHERE ${where.join(' AND ')}
-    ORDER BY p.rating DESC, p.id DESC
+    ORDER BY p.item_sold DESC, p.rating DESC, p.id DESC
     LIMIT ${limit}`;
   const [rows] = await mysql.query(sql, params);
   if (!rows.length) {

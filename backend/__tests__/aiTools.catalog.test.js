@@ -38,7 +38,7 @@ describe('search_products', () => {
     expect(out.products[0].name).toBe('Papan A');
     const [sql, params] = mysql.query.mock.calls[0];
     expect(sql).toMatch(/LIMIT/);
-    expect(params).toContain('Jakarta');
+    expect(params).toContain('%Jakarta%');
   });
 
   test('returns empty result with helpful note when no rows', async () => {

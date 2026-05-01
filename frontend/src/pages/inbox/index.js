@@ -4,7 +4,7 @@ import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import { fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
-import { formatRelative, truncate, convStatusLabel } from '@/lib/format';
+import { formatRelative, truncate, convStatusLabel, formatPhone } from '@/lib/format';
 
 const STATUS_FILTERS = [
   { value: '',       label: 'Semua' },
@@ -97,7 +97,7 @@ export default function InboxList() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-sm text-slate-800">
-                            {conv.phone}
+                            {formatPhone(conv.phone)}
                           </span>
                           <span className={`status-pill ${status.cls}`}>
                             {status.label}

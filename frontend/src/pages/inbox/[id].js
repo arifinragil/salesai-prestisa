@@ -7,7 +7,7 @@ import HandoverBanner from '@/components/HandoverBanner';
 import { api, fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
 import { useToast } from '@/components/Toast';
-import { convStatusLabel, formatRelative } from '@/lib/format';
+import { convStatusLabel, formatRelative, formatPhone } from '@/lib/format';
 
 export default function ChatDetail() {
   const router = useRouter();
@@ -109,8 +109,13 @@ export default function ChatDetail() {
             </button>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-800">
-                {convData?.phone || id}
+                {convData ? formatPhone(convData.phone) : id}
               </span>
+              {convData?.phone?.endsWith?.('@lid') && (
+                <span className="text-xs text-slate-400" title={convData.phone}>
+                  (LID — nomor asli tidak terdeteksi)
+                </span>
+              )}
               {status && <span className={`status-pill ${status.cls}`}>{status.label}</span>}
               {convData?.last_intent && (
                 <span className="text-xs text-slate-400">· {convData.last_intent}</span>
@@ -146,12 +151,21 @@ export default function ChatDetail() {
               />
               Shadow
             </label>
-            <button
-              onClick={() => callAction('/close', 'Tutup')}
-              className="text-xs px-3 py-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50"
-            >
-              Close
-            </button>
+            {convData?.status === 'closed' ? (
+              <button
+                onClick={() => callAction('/reopen', 'Reopen')}
+                className="text-xs px-3 py-1.5 rounded-md text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border border-emerald-200"
+              >
+                Reopen
+              </button>
+            ) : (
+              <button
+                onClick={() => callAction('/close', 'Tutup')}
+                className="text-xs px-3 py-1.5 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50"
+              >
+                Close
+              </button>
+            )}
           </div>
         </div>
 

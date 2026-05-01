@@ -123,6 +123,14 @@ router.post('/conversations/:id/close', async (req, res) => {
   res.json({ success: true });
 });
 
+router.post('/conversations/:id/reopen', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  await pg.query(`UPDATE crm_conversations SET status = 'active', updated_at = now() WHERE id = $1`, [id]);
+  notify.notifyConvUpdated(id);
+  res.json({ success: true });
+});
+
 router.post('/conversations/:id/shadow', async (req, res) => {
   const id = parseInt(req.params.id);
   const enabled = !!req.body?.enabled;

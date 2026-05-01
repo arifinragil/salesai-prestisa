@@ -26,6 +26,28 @@ export function formatTimestamp(ts) {
   });
 }
 
+export function formatPhone(phone) {
+  if (!phone) return '—';
+  const s = String(phone);
+  // WhatsApp Linked Identifier — opaque internal ID, not a real phone
+  if (s.endsWith('@lid')) {
+    const head = s.split('@')[0];
+    return `LID:${head.slice(-6)}`;
+  }
+  // Strip any other JID suffix (@c.us, @s.whatsapp.net)
+  const head = s.split('@')[0].replace(/\D/g, '');
+  if (!head) return s;
+  // Format Indonesian phone: 6281234567890 → +62 812-3456-7890
+  if (head.startsWith('62') && head.length >= 11) {
+    const rest = head.slice(2);
+    const part1 = rest.slice(0, 3);
+    const part2 = rest.slice(3, 7);
+    const part3 = rest.slice(7);
+    return `+62 ${part1}-${part2}${part3 ? '-' + part3 : ''}`;
+  }
+  return head;
+}
+
 export function truncate(s, n = 60) {
   if (s == null) return '';
   const str = String(s);
