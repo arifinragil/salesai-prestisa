@@ -3,17 +3,44 @@ const pg = require('../db/postgres');
 const { requireStaff } = require('../middleware/auth');
 const settingsSvc = require('../services/settings');
 const costGuard = require('../services/costGuard');
+const aiClient = require('../services/aiClient');
 
 const router = express.Router();
 router.use(requireStaff);
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-const ALLOWED_SETTING_KEYS = new Set(['daily_cost_cap_usd', 'shadow_mode_default']);
+const ALLOWED_SETTING_KEYS = new Set([
+  'daily_cost_cap_usd',
+  'shadow_mode_default',
+  'reply_provider',
+  'ai_credentials',
+]);
 
 router.get('/settings', async (_req, res) => {
   const items = await settingsSvc.listSettings();
-  res.json({ success: true, items });
+  // Mask api_keys in ai_credentials before returning
+  const masked = items.map((it) => {
+    if (it.key === 'ai_credentials' && it.value && typeof it.value === 'object') {
+      const m = {};
+      for (const provider of Object.keys(it.value)) {
+        const cfg = it.value[provider] || {};
+        m[provider] = {
+          api_key_set: !!cfg.api_key,
+          api_key_preview: cfg.api_key ? cfg.api_key.slice(0, 7) + '…' + cfg.api_key.slice(-4) : null,
+          model: cfg.model || null,
+        };
+      }
+      return { ...it, value: m };
+    }
+    return it;
+  });
+  res.json({ success: true, items: masked });
+});
+
+router.get('/ai/provider', async (_req, res) => {
+  const status = await aiClient.getActiveStatus();
+  res.json({ success: true, ...status, valid_providers: aiClient.VALID_PROVIDERS });
 });
 
 router.put('/settings/:key', async (req, res) => {
@@ -31,9 +58,31 @@ router.put('/settings/:key', async (req, res) => {
     value = n;
   } else if (key === 'shadow_mode_default') {
     value = !!value;
+  } else if (key === 'reply_provider') {
+    if (!aiClient.VALID_PROVIDERS.includes(value)) {
+      return res.status(400).json({ success: false, message: `provider must be one of: ${aiClient.VALID_PROVIDERS.join(', ')}` });
+    }
+  } else if (key === 'ai_credentials') {
+    if (!value || typeof value !== 'object') {
+      return res.status(400).json({ success: false, message: 'value must be object {provider: {api_key, model}}' });
+    }
+    // Merge with existing so user can update one provider without losing others.
+    // If a field is empty string/null in incoming, keep existing.
+    const existing = (await settingsSvc.getSetting('ai_credentials', {})) || {};
+    const merged = { ...existing };
+    for (const provider of Object.keys(value)) {
+      if (!aiClient.VALID_PROVIDERS.includes(provider)) continue;
+      const incoming = value[provider] || {};
+      const prev = existing[provider] || {};
+      merged[provider] = {
+        api_key: (incoming.api_key && String(incoming.api_key).trim()) || prev.api_key || null,
+        model: (incoming.model && String(incoming.model).trim()) || prev.model || null,
+      };
+    }
+    value = merged;
   }
   await settingsSvc.setSetting(key, value, req.staff.staff_id);
-  res.json({ success: true, key, value });
+  res.json({ success: true, key, masked: key === 'ai_credentials' ? true : false });
 });
 
 router.get('/cost/today', async (_req, res) => {

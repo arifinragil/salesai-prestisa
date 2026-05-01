@@ -1,6 +1,6 @@
 const pg = require('../db/postgres');
 const waClient = require('./waClient');
-const claude = require('./claudeClient');
+const aiClient = require('./aiClient');
 const gemini = require('./geminiClient');
 const tools = require('./aiTools');
 const persona = require('./aiPersona');
@@ -219,7 +219,7 @@ async function processOne() {
 
     let llm;
     try {
-      llm = await claude.generateWithTools({
+      llm = await aiClient.generateWithTools({
         systemPrompt, messages, tools: tools.declarations, executor: exec, maxIterations: 5,
       });
     } catch (err) {
@@ -232,8 +232,10 @@ async function processOne() {
     }
 
     const latencyMs = Date.now() - startedAt;
+    const activeStatus = await aiClient.getActiveStatus().catch(() => ({ provider: 'unknown', model: '?' }));
     const baseMeta = {
-      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',
+      provider: activeStatus.provider,
+      model: activeStatus.model,
       latency_ms: latencyMs,
       tokens_in: llm.usage.input_tokens,
       tokens_out: llm.usage.output_tokens,

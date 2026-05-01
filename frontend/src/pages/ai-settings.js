@@ -10,11 +10,19 @@ export default function AiSettings() {
   const personas = useSWR('/api/admin/personas', fetcher);
   const aiGlobal = useSWR('/api/admin/ai/global', fetcher, { refreshInterval: 30_000 });
   const settings = useSWR('/api/admin/settings', fetcher);
+  const aiProvider = useSWR('/api/admin/ai/provider', fetcher);
 
   const [selectedId, setSelectedId] = useState(null);
   const [draftPrompt, setDraftPrompt] = useState('');
   const [draftName, setDraftName] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // AI provider edit state
+  const [providerDraft, setProviderDraft] = useState('');
+  const [anthroKey, setAnthroKey] = useState('');
+  const [anthroModel, setAnthroModel] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('');
 
   // Load full text of selected persona
   const personaDetail = useSWR(
@@ -79,10 +87,143 @@ export default function AiSettings() {
     } catch (e) { toast.error(e.message); }
   }
 
+  async function saveProvider() {
+    if (!providerDraft) return;
+    try {
+      await api('/api/admin/settings/reply_provider', { method: 'PUT', body: { value: providerDraft } });
+      toast.success(`Active provider: ${providerDraft}`);
+      aiProvider.mutate();
+      setProviderDraft('');
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function saveCredentials(provider, apiKey, model) {
+    try {
+      const body = {
+        value: { [provider]: { api_key: apiKey || undefined, model: model || undefined } },
+      };
+      await api('/api/admin/settings/ai_credentials', { method: 'PUT', body });
+      toast.success(`${provider} credentials saved`);
+      settings.mutate();
+      aiProvider.mutate();
+      // Clear input fields after save
+      if (provider === 'anthropic') { setAnthroKey(''); setAnthroModel(''); }
+      if (provider === 'openai')    { setOpenaiKey(''); setOpenaiModel(''); }
+    } catch (e) { toast.error(e.message); }
+  }
+
+  const credentials = getSetting('ai_credentials', {});
+  const activeProvider = aiProvider.data?.provider || 'anthropic';
+  const activeModel = aiProvider.data?.model || '';
+
   return (
     <Layout title="Persona & Settings — Tiara">
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-6">
         <h1 className="text-lg font-semibold text-slate-800">Persona & Settings</h1>
+
+        {/* AI Provider */}
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700">AI Provider</h2>
+              <div className="text-xs text-slate-500 mt-1">
+                Active: <span className="font-medium text-slate-800">{activeProvider}</span>
+                {' · '}
+                Model: <span className="font-mono text-slate-700">{activeModel}</span>
+                {' · '}
+                {aiProvider.data?.has_api_key
+                  ? <span className="text-emerald-600">key set ✓</span>
+                  : <span className="text-rose-600">key MISSING — AI tidak bisa reply</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={providerDraft || activeProvider}
+                onChange={(e) => setProviderDraft(e.target.value)}
+                className="px-3 py-1.5 text-sm border border-slate-200 rounded bg-white"
+              >
+                {(aiProvider.data?.valid_providers || ['anthropic', 'openai']).map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <button
+                onClick={saveProvider}
+                disabled={!providerDraft || providerDraft === activeProvider}
+                className="text-sm px-3 py-1.5 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-40"
+              >
+                Switch active
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            {/* Anthropic */}
+            <div className="border border-slate-200 rounded-md p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium text-slate-700 text-sm">Anthropic (Claude)</div>
+                {credentials?.anthropic?.api_key_set && (
+                  <span className="text-xs text-emerald-600" title={credentials.anthropic.api_key_preview}>
+                    ✓ {credentials.anthropic.api_key_preview}
+                  </span>
+                )}
+              </div>
+              <input
+                type="password"
+                value={anthroKey}
+                onChange={(e) => setAnthroKey(e.target.value)}
+                placeholder="sk-ant-... (kosongin = jangan ubah)"
+                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+              />
+              <input
+                type="text"
+                value={anthroModel}
+                onChange={(e) => setAnthroModel(e.target.value)}
+                placeholder={credentials?.anthropic?.model || 'claude-sonnet-4-6'}
+                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+              />
+              <button
+                onClick={() => saveCredentials('anthropic', anthroKey, anthroModel)}
+                disabled={!anthroKey && !anthroModel}
+                className="text-sm px-3 py-1.5 rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+
+            {/* OpenAI */}
+            <div className="border border-slate-200 rounded-md p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium text-slate-700 text-sm">OpenAI (GPT)</div>
+                {credentials?.openai?.api_key_set && (
+                  <span className="text-xs text-emerald-600" title={credentials.openai.api_key_preview}>
+                    ✓ {credentials.openai.api_key_preview}
+                  </span>
+                )}
+              </div>
+              <input
+                type="password"
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
+                placeholder="sk-... (kosongin = jangan ubah)"
+                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+              />
+              <input
+                type="text"
+                value={openaiModel}
+                onChange={(e) => setOpenaiModel(e.target.value)}
+                placeholder={credentials?.openai?.model || 'gpt-4o-mini'}
+                className="w-full mb-2 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono"
+              />
+              <button
+                onClick={() => saveCredentials('openai', openaiKey, openaiModel)}
+                disabled={!openaiKey && !openaiModel}
+                className="text-sm px-3 py-1.5 rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* Quick toggles */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
