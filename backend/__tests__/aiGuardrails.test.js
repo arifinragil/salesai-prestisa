@@ -11,6 +11,13 @@ describe('extractPriceMentions', () => {
   test('handles k/rb suffix', () => {
     expect(extractPriceMentions('mulai 500k aja')).toEqual(['500000']);
   });
+  test('ignores order numbers / tracking IDs (10+ digits)', () => {
+    expect(extractPriceMentions('PO 3258042604100976001 sudah jalan')).toEqual([]);
+    expect(extractPriceMentions('tracking 1234567890123 telah dikirim')).toEqual([]);
+  });
+  test('still catches real prices in mixed text', () => {
+    expect(extractPriceMentions('PO 3258042604100976001 totalnya Rp 1.443.000')).toEqual(['1443000']);
+  });
 });
 
 describe('hasHesitation', () => {

@@ -34,16 +34,23 @@ function extractPriceMentions(reply) {
   if (!reply) return [];
   const out = new Set();
 
+  // Anything beyond a reasonable price ceiling is treated as an identifier
+  // (order number, tracking, phone) and ignored.
+  const PRICE_MAX = 100_000_000;
+
   const reK = /\b(\d{1,4})\s*(k|rb|ribu)\b/gi;
   let m;
   while ((m = reK.exec(reply)) !== null) {
-    out.add(String(parseInt(m[1]) * 1000));
+    const n = parseInt(m[1]) * 1000;
+    if (n >= 10000 && n <= PRICE_MAX) out.add(String(n));
   }
 
-  const reN = /\b(\d{1,3}(?:[.,]\d{3})+|\d{5,})\b/g;
+  // Match thousand-separated forms (1.500.000) or compact 5-9 digit numbers.
+  // Beyond 9 digits = clearly an identifier, not a price.
+  const reN = /\b(\d{1,3}(?:[.,]\d{3})+|\d{5,9})\b/g;
   while ((m = reN.exec(reply)) !== null) {
     const n = parseInt(m[1].replace(/[.,]/g, ''));
-    if (n >= 10000) out.add(String(n));
+    if (n >= 10000 && n <= PRICE_MAX) out.add(String(n));
   }
 
   return Array.from(out);
@@ -66,11 +73,21 @@ function collectToolPrices(toolCalls) {
     }
     if (typeof r.fee === 'number') prices.add(String(r.fee));
     if (typeof r.total === 'number') prices.add(String(r.total));
+    // track_order returns { order: { total }, items: [...] }
+    if (r.order && typeof r.order.total !== 'undefined') {
+      const t = parseInt(r.order.total);
+      if (Number.isFinite(t)) prices.add(String(t));
+    }
     if (Array.isArray(r.orders)) {
       for (const o of r.orders) if (o.total) prices.add(String(parseInt(o.total)));
     }
     if (Array.isArray(r.items)) {
-      for (const it of r.items) if (it.price) prices.add(String(parseInt(it.price)));
+      for (const it of r.items) {
+        if (it.price) prices.add(String(parseInt(it.price)));
+        // track_order items may also expose total / subtotal
+        if (it.subtotal) prices.add(String(parseInt(it.subtotal)));
+        if (it.total) prices.add(String(parseInt(it.total)));
+      }
     }
   }
   return prices;
