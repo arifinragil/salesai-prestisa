@@ -74,19 +74,42 @@ async function recordOutbound(client, { convId, body, sentMsgId, sendStatus, sha
   return r.rows[0];
 }
 
-async function recordHandover(client, { convId, msgId, reason, summary }) {
+// Reasons that REQUIRE human intervention — pause AI 24h (operator must resume).
+// Auto-classifier failures don't pause: if next customer msg is fine, AI retries
+// naturally; if same issue repeats, it handover again — cost cap protects budget.
+const HUMAN_REQUIRED_REASONS = new Set([
+  'complaint', 'refund', 'cancel', 'legal', 'angry',
+  'explicit_request_human', 'custom_price', 'manual_takeover',
+]);
+
+async function recordHandover(client, { convId, msgId, reason, summary, pauseHours }) {
   const r = await client.query(
     `INSERT INTO crm_handovers (conversation_id, message_id, reason, detail) VALUES ($1, $2, $3, $4) RETURNING id`,
     [convId, msgId || null, reason, summary || null]
   );
-  await client.query(
-    `UPDATE crm_conversations
-       SET ai_paused_until = now() + INTERVAL '24 hours',
-           handover_count = handover_count + 1,
-           updated_at = now()
-     WHERE id = $1`,
-    [convId]
-  );
+  // Decide pause: explicit pauseHours wins; else by reason category.
+  const hours = pauseHours != null
+    ? pauseHours
+    : (HUMAN_REQUIRED_REASONS.has(reason) ? 24 : 0);
+
+  if (hours > 0) {
+    await client.query(
+      `UPDATE crm_conversations
+         SET ai_paused_until = now() + ($2 || ' hours')::interval,
+             handover_count = handover_count + 1,
+             updated_at = now()
+       WHERE id = $1`,
+      [convId, String(hours)]
+    );
+  } else {
+    // Bump handover_count but don't pause AI — let next message retry naturally
+    await client.query(
+      `UPDATE crm_conversations
+         SET handover_count = handover_count + 1, updated_at = now()
+       WHERE id = $1`,
+      [convId]
+    );
+  }
   return r.rows[0].id;
 }
 

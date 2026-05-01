@@ -524,26 +524,40 @@ async function recommend_products({ args, conv }) {
   };
 }
 
+// Same logic as aiAgent.HUMAN_REQUIRED_REASONS — kept in sync.
+const HUMAN_REQUIRED = new Set([
+  'complaint', 'refund', 'cancel', 'custom_price',
+  'explicit_request_human', 'legal', 'angry', 'manual_takeover',
+]);
+
 async function request_handover({ args, conv }) {
   const reason = String(args.reason || '').toLowerCase();
   if (!VALID_HANDOVER_REASONS.has(reason)) {
     return { error: `reason "${reason}" tidak valid. Valid: ${Array.from(VALID_HANDOVER_REASONS).join(', ')}` };
   }
   const summary = String(args.summary || '').slice(0, 1000);
+  const pauseHours = HUMAN_REQUIRED.has(reason) ? 24 : 0;
 
   const ins = await pg.query(
     `INSERT INTO crm_handovers (conversation_id, reason, detail) VALUES ($1, $2, $3) RETURNING id`,
     [conv.id, reason, summary]
   );
-  await pg.query(
-    `UPDATE crm_conversations
-       SET ai_paused_until = now() + INTERVAL '24 hours',
-           handover_count = handover_count + 1,
-           updated_at = now()
-     WHERE id = $1`,
-    [conv.id]
-  );
-  return { ok: true, handover_id: ins.rows[0].id, paused_for_hours: 24 };
+  if (pauseHours > 0) {
+    await pg.query(
+      `UPDATE crm_conversations
+         SET ai_paused_until = now() + ($2 || ' hours')::interval,
+             handover_count = handover_count + 1,
+             updated_at = now()
+       WHERE id = $1`,
+      [conv.id, String(pauseHours)]
+    );
+  } else {
+    await pg.query(
+      `UPDATE crm_conversations SET handover_count = handover_count + 1, updated_at = now() WHERE id = $1`,
+      [conv.id]
+    );
+  }
+  return { ok: true, handover_id: ins.rows[0].id, paused_for_hours: pauseHours };
 }
 
 const executors = {

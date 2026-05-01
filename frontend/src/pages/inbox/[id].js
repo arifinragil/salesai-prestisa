@@ -4,6 +4,7 @@ import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import ChatThread from '@/components/ChatThread';
 import HandoverBanner from '@/components/HandoverBanner';
+import CustomerPanel from '@/components/CustomerPanel';
 import { api, fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
 import { useToast } from '@/components/Toast';
@@ -162,7 +163,8 @@ export default function ChatDetail() {
 
   return (
     <Layout title={`Chat ${convData?.phone || ''} — Tiara`}>
-      <div className="max-w-5xl mx-auto h-[calc(100vh-57px)] flex flex-col">
+      <div className="max-w-7xl mx-auto h-[calc(100vh-57px)] flex">
+        <div className="flex-1 min-w-0 flex flex-col">
         {/* Header */}
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
           <div className="min-w-0">
@@ -338,6 +340,12 @@ export default function ChatDetail() {
             Sebagai {me.data.user.username} (operator). Pesan langsung dikirim ke WhatsApp.
           </div>
         )}
+        </div>
+
+        {/* Right sidebar: customer profile */}
+        <div className="hidden lg:block">
+          <CustomerPanel convId={id} />
+        </div>
       </div>
     </Layout>
   );

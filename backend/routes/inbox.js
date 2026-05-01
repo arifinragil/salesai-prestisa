@@ -227,6 +227,62 @@ router.get('/handovers', async (req, res) => {
   res.json({ success: true, items: rows });
 });
 
+// Customer profile + recent orders (read-only enrichment for the chat panel)
+router.get('/conversations/:id/customer', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const { rows } = await pg.query(
+    `SELECT id, phone, customer_id, last_message_at, last_intent,
+            handover_count, status, shadow_mode, wa_session
+     FROM crm_conversations WHERE id = $1`, [id]
+  );
+  const conv = rows[0];
+  if (!conv) return res.status(404).json({ success: false, message: 'not found' });
+
+  const profile = { phone: conv.phone, customer_id: conv.customer_id, name: null,
+    email: null, total_orders: 0, total_spent: 0, recent_orders: [] };
+
+  if (conv.customer_id) {
+    try {
+      const mysql = require('../db/mysql');
+      const [crows] = await mysql.query(
+        `SELECT id, name, email, phone FROM customer WHERE id = ? LIMIT 1`,
+        [conv.customer_id]
+      );
+      if (crows[0]) {
+        profile.name = crows[0].name;
+        profile.email = crows[0].email;
+      }
+      const [stats] = await mysql.query(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS spent
+         FROM \`order\` WHERE customer_id = ? AND deleted_at IS NULL`,
+        [conv.customer_id]
+      );
+      profile.total_orders = Number(stats[0]?.n || 0);
+      profile.total_spent = Number(stats[0]?.spent || 0);
+      const [recent] = await mysql.query(
+        `SELECT id, order_number, status, payment_status, total, created_at
+         FROM \`order\` WHERE customer_id = ? AND deleted_at IS NULL
+         ORDER BY id DESC LIMIT 5`,
+        [conv.customer_id]
+      );
+      profile.recent_orders = recent;
+    } catch (err) {
+      logger.warn({ err: err.message, convId: id }, '[inbox.customer] mysql lookup failed');
+    }
+  }
+
+  res.json({
+    success: true,
+    conversation: {
+      id: conv.id, last_intent: conv.last_intent,
+      handover_count: conv.handover_count, status: conv.status,
+      shadow_mode: conv.shadow_mode, wa_session: conv.wa_session,
+    },
+    profile,
+  });
+});
+
 // ── AI helpers untuk operator (suggest reply + summary) ────────────────────
 
 async function loadConvContext(convId, historyLimit = 30) {
