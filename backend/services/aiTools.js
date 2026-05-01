@@ -113,6 +113,17 @@ const declarations = [
     },
   },
   {
+    name: 'track_order',
+    description: 'Cek status pengiriman / progress order berdasarkan NOMOR ORDER yang disebut customer (PO number, order number, atau order_id digit). Pakai untuk pertanyaan tipe "kapan sampai?", "PO 12345 sudah dikirim belum?", "pesanan saya sudah jalan?". Tidak perlu customer_id — bisa dipakai walau customer belum login. Return: status order, status PO per item (in_progress / shipped / delivered), tracking number, ekspedisi, scheduled date, dan link bukti kirim kalau ada.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        order_number: { type: 'string', description: 'Nomor order yang disebut customer. Boleh angka saja (mis. "12345") atau format lengkap (mis. "ORD-12345").' },
+      },
+      required: ['order_number'],
+    },
+  },
+  {
     name: 'recommend_products',
     description: 'Kirim 1-3 produk rekomendasi sebagai foto + caption (nama, harga) langsung ke chat customer via WhatsApp. Pakai SETELAH search_products dapat produk yang cocok dan kamu mau pamerkan ke customer dengan visual. Setelah pakai tool ini, lanjutkan reply text seperti biasa (mis. "Itu beberapa pilihannya Kak, mau yang mana?"). JANGAN kirim URL gambar di text reply — biarkan tool ini yang ngirim.',
     input_schema: {
@@ -177,10 +188,9 @@ async function search_products({ args }) {
     where.push(`(c.name LIKE ? OR p.name LIKE ?)`);
   }
   if (args.city) {
-    // products.city is an INT FK to a city catalog we don't have access to.
-    // Best-effort: city keyword in product name (many SKUs include city).
+    // Use proper geo lookup (city table is `geo`, products.city = geo.id)
     params.push(`%${args.city}%`);
-    where.push(`p.name LIKE ?`);
+    where.push(`g_city.name LIKE ?`);
   }
   if (args.budget_min) {
     params.push(parseInt(args.budget_min));
@@ -195,13 +205,24 @@ async function search_products({ args }) {
     where.push(`p.name LIKE ?`);
   }
 
+  // Sales-rank subquery (same logic as the Typebot n8n workflow)
   const sql = `
     SELECT p.id, p.name, COALESCE(c.name, '?') AS category,
-           p.price, p.image AS image_url, p.description, p.item_sold, p.rating
+           p.price, p.image AS image_url, p.description,
+           g_city.name AS city,
+           COALESCE(s.total_penjualan, 0) AS total_penjualan
     FROM products p
     LEFT JOIN product_category_new c ON c.id = p.category_id
+    LEFT JOIN geo g_city ON g_city.id = p.city
+    LEFT JOIN (
+      SELECT order_items.product_id, COUNT(order_items.product_code) AS total_penjualan
+      FROM order_items
+      INNER JOIN purchase_order ON order_items.id = purchase_order.pr_id
+      WHERE order_items.bought > 0 AND order_items.deleted_at IS NULL AND purchase_order.deleted_at IS NULL
+      GROUP BY order_items.product_id
+    ) s ON s.product_id = p.id
     WHERE ${where.join(' AND ')}
-    ORDER BY p.item_sold DESC, p.rating DESC, p.id DESC
+    ORDER BY total_penjualan DESC, p.id DESC
     LIMIT ${limit}`;
   const [rows] = await mysql.query(sql, params);
   if (!rows.length) {
@@ -223,8 +244,8 @@ async function list_categories({ args }) {
     `SELECT c.id AS category_id, c.name, COUNT(p.id) AS count
      FROM product_category_new c
      LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL AND p.price > 0
-       AND p.name LIKE ?
-     WHERE c.deleted_at IS NULL
+     LEFT JOIN geo g_city ON g_city.id = p.city
+     WHERE c.deleted_at IS NULL AND g_city.name LIKE ?
      GROUP BY c.id, c.name
      HAVING count > 0
      ORDER BY count DESC
@@ -241,9 +262,10 @@ async function get_shipping_info({ args }) {
   let available = isJabodetabek;
   if (!isJabodetabek) {
     try {
-      // No accessible city catalog; check if any product mentions the city in its name.
+      // Use geo table to check if Prestisa stocks anything in this city.
       const [rows] = await mysql.query(
-        `SELECT 1 FROM products WHERE name LIKE ? AND deleted_at IS NULL AND price > 0 LIMIT 1`,
+        `SELECT 1 FROM products p JOIN geo g ON g.id = p.city
+         WHERE g.name LIKE ? AND p.deleted_at IS NULL AND p.price > 0 LIMIT 1`,
         [`%${city}%`]
       );
       available = rows.length > 0;
@@ -368,6 +390,68 @@ async function get_order_status({ args, customer_id }) {
   };
 }
 
+async function track_order({ args }) {
+  const raw = String(args.order_number || '').trim();
+  if (!raw) return { error: 'order_number wajib diisi' };
+  const digits = raw.replace(/\D/g, '');
+  const numericId = digits ? parseInt(digits) : null;
+
+  // Find order by id OR order_number (no customer_id scoping — public lookup)
+  const [orders] = await mysql.query(
+    `SELECT id, order_number, status, payment_status, total, created_at
+     FROM \`order\`
+     WHERE deleted_at IS NULL AND (id = ? OR order_number = ?)
+     LIMIT 1`,
+    [numericId, raw]
+  );
+  if (!orders.length) {
+    return { found: false, note: `Order "${raw}" tidak ditemukan. Pastikan nomor benar (cek email/WA bukti pesan), atau handover ke tim Prestisa.` };
+  }
+  const order = orders[0];
+
+  // Per-item PO status (production / shipping)
+  const [items] = await mysql.query(
+    `SELECT oi.id AS item_id, oi.name AS product_name, oi.qty,
+            oi.receiver_name, oi.date_time AS scheduled_at, oi.order_status AS item_status,
+            po.status AS po_status, po.payment_status AS po_payment_status,
+            po.shipping_expedition, po.tracking_number, po.shipped_date,
+            po.delivery_receipt, po.courier_phone, po.notes
+     FROM order_items oi
+     LEFT JOIN purchase_order po ON po.pr_id = oi.id AND po.deleted_at IS NULL
+     WHERE oi.order_id = ? AND oi.deleted_at IS NULL
+     ORDER BY oi.id ASC LIMIT 30`,
+    [order.id]
+  );
+
+  return {
+    found: true,
+    order: {
+      id: order.id,
+      order_number: order.order_number,
+      status: order.status,
+      payment_status: order.payment_status,
+      total: order.total,
+      created_at: order.created_at,
+    },
+    items: items.map((it) => ({
+      product_name: String(it.product_name || '').slice(0, 80),
+      qty: it.qty,
+      receiver_name: it.receiver_name,
+      scheduled_at: it.scheduled_at,
+      item_status: it.item_status,
+      po_status: it.po_status,
+      po_payment_status: it.po_payment_status,
+      shipping_expedition: it.shipping_expedition,
+      tracking_number: it.tracking_number,
+      shipped_date: it.shipped_date,
+      has_delivery_proof: !!it.delivery_receipt,
+      courier_phone: it.courier_phone,
+    })),
+    eta_default: '3-6 jam setelah pembayaran terkonfirmasi (kalau belum shipped)',
+    note: 'Sebutkan status per item (kalau lebih dari 1) dengan ringkas. Kalau status janggal (belum bayar / refund / dispute), tawarkan handover ke tim.',
+  };
+}
+
 async function recommend_products({ args, conv }) {
   const ids = (Array.isArray(args.product_ids) ? args.product_ids : [])
     .slice(0, 3)
@@ -448,6 +532,7 @@ const executors = {
   build_order_form_url,
   find_customer_orders,
   get_order_status,
+  track_order,
   recommend_products,
   request_handover,
 };
