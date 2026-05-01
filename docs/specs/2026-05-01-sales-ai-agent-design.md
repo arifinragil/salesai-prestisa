@@ -86,7 +86,7 @@ The AI focuses on the top 5 themes (order intent, shipping, status, payment info
 | Decision | Choice | Rationale |
 |---|---|---|
 | Project location | `/home/krttpt/crm/` (sibling to `konsumen/`, `mitra/`) | Pilot, disposable, separate ownership |
-| WhatsApp provider | **WAHA** (self-hosted) | Reuse pattern from `mitra/crm-backend/services/waha.js` |
+| WhatsApp provider | **WAHA** (self-hosted) via abstraction layer | Reuse pattern from `mitra/crm-backend/services/waha.js`. Abstraction allows future swap to Meta Cloud API / Twilio without rewriting agent core |
 | Async vs sync | **PG-based queue + in-proc worker** | 5.7K msg/day average; spikes possible; webhook must return <500ms |
 | LLM (reply) | **Claude Sonnet 4.6** (`claude-sonnet-4-6`) | Best Bahasa Indonesia tone & tool-call reliability |
 | LLM (pre-classifier) | **Gemini 2.5 Flash** | Cheap, fast, already configured (`GEMINI_API_KEY` available) |
@@ -240,7 +240,10 @@ CREATE INDEX crm_promo_active_idx ON crm_promo_settings(active, ends_at) WHERE a
 │   │   ├── aiConfidence.js         # score reply quality
 │   │   ├── claudeClient.js         # Anthropic SDK wrapper
 │   │   ├── geminiClient.js         # Gemini wrapper (classifier)
-│   │   ├── wahaClient.js           # WAHA HTTP client (send + media)
+│   │   ├── waClient.js             # WhatsApp provider INTERFACE (send/onIncoming) + factory
+│   │   ├── waAdapters/
+│   │   │   ├── wahaAdapter.js      # WAHA implementation (default)
+│   │   │   └── metaCloudAdapter.js # Meta Cloud API impl (Phase 2 placeholder)
 │   │   ├── contactResolver.js      # phone → customer_id (MySQL lookup)
 │   │   └── notify.js               # operator notification (Socket.IO)
 │   ├── middleware/
@@ -499,7 +502,7 @@ Pilot cost target: **<$1,000/month** at full live.
 
 | # | Question / Risk | Resolution path |
 |---|---|---|
-| 1 | WAHA stability — risk WhatsApp Web ban on pilot number | Use a dedicated number; have escalation plan to Meta Cloud API as Phase 2 |
+| 1 | WAHA stability — risk WhatsApp Web ban on pilot number | Use a dedicated number. WhatsApp provider abstraction (`waClient.js` + adapters) lets Phase 2 swap to Meta Cloud API without touching agent core. Switching session/number = ENV change only (`WAHA_SESSION_NAME`, `WAHA_BASE_URL`, `WAHA_API_KEY`) |
 | 2 | Customer expects fast reply — pilot worker poll = 2s lag | Acceptable; could switch to LISTEN/NOTIFY later |
 | 3 | LLM cost spikes during peak (Valentine, Mother's Day) | Add per-day cost cap → auto-pause AI when reached |
 | 4 | Pilot domain not yet decided | User to confirm: `salesai.prestisa.net` vs other |
