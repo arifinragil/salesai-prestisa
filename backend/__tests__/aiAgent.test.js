@@ -12,7 +12,8 @@ jest.mock('../services/geminiClient', () => ({
 }));
 jest.mock('../services/waAdapters/wahaAdapter', () => ({
   name: 'waha',
-  sendText: jest.fn().mockResolvedValue({ id: 'sent-msg-id' }),
+  // Unique id per call to avoid waha_message_id UNIQUE collisions across test runs
+  sendText: jest.fn().mockImplementation(() => Promise.resolve({ id: `sent-${Date.now()}-${Math.random().toString(36).slice(2,8)}` })),
   parseInbound: jest.fn(),
 }));
 jest.mock('../db/mysql', () => ({ query: jest.fn().mockResolvedValue([[]]), end: jest.fn().mockResolvedValue(undefined) }));

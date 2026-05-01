@@ -3,7 +3,8 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt';
 
 jest.mock('../services/waAdapters/wahaAdapter', () => ({
   name: 'waha',
-  sendText: jest.fn().mockResolvedValue({ id: 'manual-msg-id' }),
+  // Unique id per call to avoid waha_message_id UNIQUE collisions across test runs
+  sendText: jest.fn().mockImplementation(() => Promise.resolve({ id: `manual-${Date.now()}-${Math.random().toString(36).slice(2,8)}` })),
   parseInbound: jest.fn(),
 }));
 
