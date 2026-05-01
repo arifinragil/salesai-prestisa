@@ -166,20 +166,22 @@ export default function ChatDetail() {
     <Layout title={`Chat ${convData?.phone || ''} — Tiara`}>
       <div className="max-w-7xl mx-auto h-[calc(100vh-57px)] flex">
         <div className="flex-1 min-w-0 flex flex-col">
-        {/* Header */}
+        {/* Header — stacked on mobile (identity row + action row), inline on sm+ */}
         <div className="bg-white border-b border-slate-200 px-3 sm:px-6 py-3">
-          <div className="flex items-start gap-2 justify-between">
-            {/* Left: identity */}
-            <div className="min-w-0 flex-1">
-              <button
-                onClick={() => router.push('/inbox')}
-                className="text-xs text-slate-500 hover:text-slate-700 mb-1 -ml-1 px-1 py-0.5 rounded hover:bg-slate-50"
-                aria-label="Kembali ke inbox"
-              >
-                ← Kembali
-              </button>
+          {/* Back link — own row, always */}
+          <button
+            onClick={() => router.push('/inbox')}
+            className="text-xs text-slate-500 hover:text-slate-700 mb-2 -ml-1 px-1 py-0.5 rounded hover:bg-slate-50 inline-flex items-center"
+            aria-label="Kembali ke inbox"
+          >
+            ← Kembali
+          </button>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            {/* Identity */}
+            <div className="min-w-0 sm:flex-1">
               <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
-                <span className="font-semibold text-slate-800 text-sm sm:text-base">
+                <span className="font-semibold text-slate-800 text-sm sm:text-base break-all">
                   {convData ? formatPhone(convData.phone) : id}
                 </span>
                 {status && <span className={`status-pill ${status.cls}`}>{status.label}</span>}
@@ -196,20 +198,20 @@ export default function ChatDetail() {
               </div>
             </div>
 
-            {/* Right: actions */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Actions — own row on mobile (justify-end), inline-right on sm+ */}
+            <div className="flex items-center justify-end gap-2 shrink-0">
               {/* PRIMARY action — always visible */}
               {isPaused ? (
                 <button
                   onClick={() => callAction('/resume-ai', 'Resume AI')}
-                  className="text-xs sm:text-sm px-3 py-2 rounded-md bg-brand-500 text-white hover:bg-brand-600 whitespace-nowrap font-medium"
+                  className="text-sm px-4 py-2 rounded-md bg-brand-500 text-white hover:bg-brand-600 whitespace-nowrap font-medium min-h-[40px]"
                 >
                   Resume AI
                 </button>
               ) : (
                 <button
                   onClick={() => callAction('/takeover', 'Takeover')}
-                  className="text-xs sm:text-sm px-3 py-2 rounded-md bg-amber-500 text-white hover:bg-amber-600 whitespace-nowrap font-medium"
+                  className="text-sm px-4 py-2 rounded-md bg-amber-500 text-white hover:bg-amber-600 whitespace-nowrap font-medium min-h-[40px]"
                 >
                   Takeover
                 </button>
