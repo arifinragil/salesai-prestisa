@@ -32,6 +32,11 @@ app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
+// Static admin pages (login, WAHA session management)
+const path = require('path');
+app.use('/admin', express.static(path.join(__dirname, 'public'), { etag: true, lastModified: true }));
+app.get('/admin', (_req, res) => res.redirect('/admin/waha-sessions.html'));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/admin', adminRoutes);

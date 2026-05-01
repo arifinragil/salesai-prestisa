@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Login — Tiara Admin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { font: 15px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f7f7f8; margin: 0; }
+    .wrap { max-width: 360px; margin: 80px auto; padding: 32px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    h1 { margin: 0 0 24px; font-size: 20px; }
+    label { display: block; margin: 12px 0 4px; color: #444; }
+    input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+    button { width: 100%; margin-top: 20px; padding: 12px; background: #0a7; color: #fff; border: 0; border-radius: 6px; font-size: 15px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .err { color: #c33; margin-top: 12px; font-size: 13px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Tiara Admin Login</h1>
+    <form id="f">
+      <label for="u">Username</label>
+      <input id="u" name="username" autocomplete="username" required>
+      <label for="p">Password</label>
+      <input id="p" name="password" type="password" autocomplete="current-password" required>
+      <button id="b" type="submit">Login</button>
+      <div class="err" id="e"></div>
+    </form>
+  </div>
+  <script>
+    const f = document.getElementById('f');
+    const b = document.getElementById('b');
+    const e = document.getElementById('e');
+    f.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      e.textContent = '';
+      b.disabled = true;
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username: document.getElementById('u').value, password: document.getElementById('p').value }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Login gagal');
+        const next = new URLSearchParams(location.search).get('next') || '/admin/waha-sessions.html';
+        location.href = next;
+      } catch (err) {
+        e.textContent = err.message;
+      } finally {
+        b.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
