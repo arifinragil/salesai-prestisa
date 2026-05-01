@@ -46,8 +46,16 @@
 </head>
 <body>
   <header>
-    <h1>Tiara — WAHA Sessions</h1>
-    <span><span class="who" id="who"></span> · <a class="logout" href="#" id="logout">Logout</a></span>
+    <div style="display:flex;align-items:center;gap:14px;">
+      <a href="/inbox" style="color:#0a7;text-decoration:none;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:4px;padding:6px 10px;border:1px solid #d4ede1;border-radius:6px;background:#f0fdf6;">← Inbox</a>
+      <h1 style="margin:0;font-size:16px;font-weight:600;">WAHA Sessions</h1>
+    </div>
+    <nav style="display:flex;align-items:center;gap:14px;font-size:13px;">
+      <a href="/admin/waha-sessions.html" style="color:#222;text-decoration:none;font-weight:500;">WAHA</a>
+      <a href="/admin/settings.html" style="color:#777;text-decoration:none;">Settings</a>
+      <span style="color:#777;" class="who" id="who"></span>
+      <a class="logout" href="#" id="logout">Logout</a>
+    </nav>
   </header>
   <main>
     <div class="row">
