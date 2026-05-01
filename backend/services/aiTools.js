@@ -142,16 +142,18 @@ const declarations = [
 
 async function search_products({ args }) {
   const limit = 5;
-  const where = ['p.deleted_at IS NULL'];
+  const where = ['p.deleted_at IS NULL', 'p.price > 0'];
   const params = [];
 
   if (args.category) {
-    params.push(args.category, args.category);
-    where.push(`(c.name = ? OR p.category_name LIKE CONCAT('%', ?, '%'))`);
+    params.push(`%${args.category}%`, `%${args.category}%`);
+    where.push(`(c.name LIKE ? OR p.name LIKE ?)`);
   }
   if (args.city) {
-    params.push(args.city);
-    where.push(`(p.city = ? OR p.city IS NULL)`);
+    // products.city is an INT FK to a city catalog we don't have access to.
+    // Best-effort: city keyword in product name (many SKUs include city).
+    params.push(`%${args.city}%`);
+    where.push(`p.name LIKE ?`);
   }
   if (args.budget_min) {
     params.push(parseInt(args.budget_min));
@@ -167,18 +169,24 @@ async function search_products({ args }) {
   }
 
   const sql = `
-    SELECT p.id, p.name, COALESCE(c.name, p.category_name) AS category,
-           p.price, p.city, p.image_url, p.description
+    SELECT p.id, p.name, COALESCE(c.name, '?') AS category,
+           p.price, p.image AS image_url, p.description
     FROM products p
     LEFT JOIN product_category_new c ON c.id = p.category_id
     WHERE ${where.join(' AND ')}
-    ORDER BY p.id DESC
+    ORDER BY p.rating DESC, p.id DESC
     LIMIT ${limit}`;
   const [rows] = await mysql.query(sql, params);
   if (!rows.length) {
     return { count: 0, products: [], note: 'Tidak ditemukan produk yang cocok dengan filter ini.' };
   }
-  return { count: rows.length, products: rows };
+  return {
+    count: rows.length,
+    products: rows.map((r) => ({
+      ...r,
+      description: r.description ? String(r.description).replace(/<[^>]+>/g, '').slice(0, 200) : null,
+    })),
+  };
 }
 
 async function list_categories({ args }) {
@@ -187,13 +195,14 @@ async function list_categories({ args }) {
   const [rows] = await mysql.query(
     `SELECT c.id AS category_id, c.name, COUNT(p.id) AS count
      FROM product_category_new c
-     LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL
-       AND (p.city = ? OR p.city IS NULL)
+     LEFT JOIN products p ON p.category_id = c.id AND p.deleted_at IS NULL AND p.price > 0
+       AND p.name LIKE ?
+     WHERE c.deleted_at IS NULL
      GROUP BY c.id, c.name
      HAVING count > 0
      ORDER BY count DESC
      LIMIT 30`,
-    [city]
+    [`%${city}%`]
   );
   return { city, count: rows.length, categories: rows };
 }
@@ -205,11 +214,10 @@ async function get_shipping_info({ args }) {
   let available = isJabodetabek;
   if (!isJabodetabek) {
     try {
-      // The standalone `city` table does not exist in lavender_lavenderPOS;
-      // use products.city as the served-cities source.
+      // No accessible city catalog; check if any product mentions the city in its name.
       const [rows] = await mysql.query(
-        `SELECT 1 FROM products WHERE LOWER(city) = ? AND deleted_at IS NULL LIMIT 1`,
-        [normCity(city)]
+        `SELECT 1 FROM products WHERE name LIKE ? AND deleted_at IS NULL AND price > 0 LIMIT 1`,
+        [`%${city}%`]
       );
       available = rows.length > 0;
     } catch {

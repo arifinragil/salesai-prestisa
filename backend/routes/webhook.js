@@ -95,6 +95,12 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     });
   } catch (err) {
     await client.query('ROLLBACK');
+    // PG 23505 = unique_violation. Happens when WAHA delivers the same webhook
+    // event twice in parallel (e.g., subscribed to both `message` and `message.any`).
+    // The first insert wins; treat the second as a duplicate not an error.
+    if (err && err.code === '23505') {
+      return res.json({ success: true, duplicate: true, message: 'race-on-unique' });
+    }
     console.error('[webhook/waha]', err);
     res.status(500).json({ success: false, message: err.message });
   } finally {
