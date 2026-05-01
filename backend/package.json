@@ -1,0 +1,32 @@
+{
+  "name": "crm-pilot-backend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node db/migrate.js",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "rollup:metrics": "node scripts/dailyMetricsRollup.js",
+    "eval": "node scripts/runEval.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@google/generative-ai": "^0.24.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.11.5",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}
