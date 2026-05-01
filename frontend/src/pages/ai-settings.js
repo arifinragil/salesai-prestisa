@@ -1,0 +1,214 @@
+import { useState, useEffect } from 'react';
+import useSWR from 'swr';
+import Layout from '@/components/Layout';
+import { fetcher, api } from '@/lib/api';
+import { useToast } from '@/components/Toast';
+import { formatRelative } from '@/lib/format';
+
+export default function AiSettings() {
+  const toast = useToast();
+  const personas = useSWR('/api/admin/personas', fetcher);
+  const aiGlobal = useSWR('/api/admin/ai/global', fetcher, { refreshInterval: 30_000 });
+  const settings = useSWR('/api/admin/settings', fetcher);
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [draftPrompt, setDraftPrompt] = useState('');
+  const [draftName, setDraftName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Load full text of selected persona
+  const personaDetail = useSWR(
+    selectedId ? `/api/admin/personas/${selectedId}` : null,
+    fetcher
+  );
+  useEffect(() => {
+    if (personaDetail.data?.persona) {
+      setDraftPrompt(personaDetail.data.persona.prompt_text || '');
+      setDraftName(personaDetail.data.persona.name + '_' + new Date().toISOString().slice(0, 10));
+    }
+  }, [personaDetail.data]);
+
+  async function activate(id) {
+    if (!confirm('Activate persona ini? Persona aktif sebelumnya akan di-deactivate.')) return;
+    setBusy(true);
+    try {
+      await api(`/api/admin/personas/${id}/activate`, { method: 'POST' });
+      toast.success('Persona activated');
+      personas.mutate();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function saveAsNewVersion() {
+    if (!draftName.trim() || !draftPrompt.trim()) {
+      toast.error('Name dan prompt wajib');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api('/api/admin/personas', {
+        method: 'POST',
+        body: { name: draftName.trim(), prompt_text: draftPrompt },
+      });
+      toast.success(`Saved as new version (#${r.id}). Belum activate — klik Activate untuk pakai.`);
+      personas.mutate();
+      setSelectedId(r.id);
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function toggleAi() {
+    const enabled = !aiGlobal.data?.enabled;
+    try {
+      await api('/api/admin/ai/global', { method: 'POST', body: { enabled } });
+      toast.success('AI global ' + (enabled ? 'ON' : 'OFF'));
+      aiGlobal.mutate();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  function getSetting(key, fallback) {
+    const item = settings.data?.items?.find((i) => i.key === key);
+    return item ? item.value : fallback;
+  }
+
+  async function saveSetting(key, value) {
+    try {
+      await api(`/api/admin/settings/${key}`, { method: 'PUT', body: { value } });
+      toast.success(`${key} saved`);
+      settings.mutate();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  return (
+    <Layout title="Persona & Settings — Tiara">
+      <div className="max-w-6xl mx-auto px-6 py-6 space-y-6">
+        <h1 className="text-lg font-semibold text-slate-800">Persona & Settings</h1>
+
+        {/* Quick toggles */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <div className="text-xs text-slate-500 uppercase mb-1">Global AI</div>
+            <div className="flex items-center justify-between">
+              <span className={`status-pill ${aiGlobal.data?.enabled ? 'status-active' : 'status-handover'}`}>
+                {aiGlobal.data?.enabled ? 'ON' : 'OFF'}
+              </span>
+              <button
+                onClick={toggleAi}
+                className="text-sm px-3 py-1 rounded-md bg-white border border-slate-200 hover:bg-slate-50"
+              >
+                Toggle
+              </button>
+            </div>
+            <div className="text-xs text-slate-400 mt-2">
+              Kill switch — bukan persistent (reset saat backend restart).
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <div className="text-xs text-slate-500 uppercase mb-1">Daily cost cap (USD)</div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number" step="0.5" min="0"
+                defaultValue={getSetting('daily_cost_cap_usd', 5)}
+                onBlur={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v) && v >= 0) saveSetting('daily_cost_cap_usd', v);
+                }}
+                className="w-24 px-2 py-1 border border-slate-200 rounded text-sm"
+              />
+              <span className="text-xs text-slate-400">save on blur</span>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <div className="text-xs text-slate-500 uppercase mb-1">Shadow default (new conv)</div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!getSetting('shadow_mode_default', false)}
+                onChange={(e) => saveSetting('shadow_mode_default', e.target.checked)}
+              />
+              <span className="text-sm text-slate-700">Conv baru auto shadow</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Persona list + editor */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-700">
+              Persona versions
+            </div>
+            <ul className="divide-y divide-slate-100 max-h-[60vh] overflow-y-auto">
+              {(personas.data?.items || []).map((p) => (
+                <li key={p.id}>
+                  <button
+                    onClick={() => setSelectedId(p.id)}
+                    className={`w-full text-left px-4 py-3 hover:bg-slate-50 ${
+                      selectedId === p.id ? 'bg-brand-50' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-800">{p.name}</span>
+                      {p.active && <span className="status-pill status-active">active</span>}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      {formatRelative(p.created_at)}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="md:col-span-2 bg-white border border-slate-200 rounded-lg p-4 flex flex-col">
+            {!selectedId ? (
+              <div className="text-sm text-slate-400 py-12 text-center">
+                Pilih persona di kiri untuk lihat / edit. Edit selalu bikin versi baru — tidak override.
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <input
+                    type="text"
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    placeholder="Name versi baru (mis. tiara_v2)"
+                    className="flex-1 mr-3 px-3 py-1.5 text-sm border border-slate-200 rounded"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={saveAsNewVersion}
+                      disabled={busy}
+                      className="text-sm px-3 py-1.5 rounded-md bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      Save as new version
+                    </button>
+                    {personaDetail.data?.persona && !personaDetail.data.persona.active && (
+                      <button
+                        onClick={() => activate(selectedId)}
+                        disabled={busy}
+                        className="text-sm px-3 py-1.5 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50"
+                      >
+                        Activate this version
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <textarea
+                  value={draftPrompt}
+                  onChange={(e) => setDraftPrompt(e.target.value)}
+                  className="flex-1 min-h-[400px] font-mono text-sm border border-slate-200 rounded p-3 focus:outline-none focus:border-brand-500"
+                  spellCheck={false}
+                />
+                <div className="text-xs text-slate-400 mt-2">
+                  {draftPrompt.length} chars · System akan inject konteks dinamis (history, customer profile) di akhir prompt sebelum dikirim ke Claude.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
