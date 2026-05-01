@@ -32,9 +32,21 @@ test('renders send-failed badge when send_status', () => {
   expect(screen.getByText('send failed')).toBeInTheDocument();
 });
 
-test('shows attachment link when attachment_url', () => {
-  render(<MessageBubble message={base({ attachment_url: 'https://x/y.jpg' })} />);
-  expect(screen.getByText('Attachment')).toHaveAttribute('href', 'https://x/y.jpg');
+test('renders <img> for image attachments', () => {
+  render(<MessageBubble message={base({ attachment_url: 'https://x/y.jpg', message_type: 'image' })} />);
+  const img = screen.getByRole('img');
+  expect(img).toHaveAttribute('src', 'https://x/y.jpg');
+  // Image is wrapped in an <a> link to open full size
+  expect(img.closest('a')).toHaveAttribute('href', 'https://x/y.jpg');
+});
+
+test('renders download link for non-image attachments (e.g. PDF)', () => {
+  render(<MessageBubble message={base({
+    attachment_url: 'https://x/contract.pdf', message_type: 'document', body: 'Kontrak terlampir',
+  })} />);
+  expect(screen.getByText('Kontrak terlampir')).toBeInTheDocument();
+  expect(screen.getByText('contract.pdf')).toBeInTheDocument();
+  expect(screen.getByText('contract.pdf').closest('a')).toHaveAttribute('href', 'https://x/contract.pdf');
 });
 
 test('renders placeholder when body is empty (e.g. media-only)', () => {
