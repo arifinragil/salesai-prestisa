@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import { fetcher, api } from '@/lib/api';
@@ -65,6 +65,9 @@ export default function AiSettings() {
   const [openaiModel, setOpenaiModel] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState('');
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [webhookEnabled, setWebhookEnabled] = useState(true);
+  const [webhookTesting, setWebhookTesting] = useState(false);
   const [models, setModels] = useState({}); // { anthropic: [...], openai: [...], gemini: [...] }
   const [loadingModels, setLoadingModels] = useState({});
 
@@ -173,6 +176,37 @@ export default function AiSettings() {
   const credentials = getSetting('ai_credentials', {});
   const activeProvider = aiProvider.data?.provider || 'anthropic';
   const activeModel = aiProvider.data?.model || '';
+  const webhook = getSetting('handover_webhook', null);
+
+  // Sync local edit state with stored when first loaded
+  useEffect(() => {
+    if (webhook && !webhookUrl) {
+      setWebhookUrl(webhook.url || '');
+      setWebhookEnabled(webhook.enabled !== false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(webhook)]);
+
+  async function saveWebhook() {
+    try {
+      await api('/api/admin/settings/handover_webhook', {
+        method: 'PUT',
+        body: { value: { url: webhookUrl, enabled: webhookEnabled } },
+      });
+      toast.success('Webhook saved');
+      settings.mutate();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function testWebhook() {
+    if (!webhookUrl) return toast.error('URL kosong');
+    setWebhookTesting(true);
+    try {
+      await api('/api/admin/webhook/test', { method: 'POST', body: { url: webhookUrl } });
+      toast.success('Test message terkirim — cek Slack/Discord channel');
+    } catch (e) { toast.error('Test gagal: ' + e.message); }
+    finally { setWebhookTesting(false); }
+  }
 
   return (
     <Layout title="Persona & Settings — Tiara">
@@ -326,7 +360,7 @@ export default function AiSettings() {
         </div>
 
         {/* Quick toggles */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <div className="text-xs text-slate-500 uppercase mb-1">Global AI</div>
             <div className="flex items-center justify-between">
@@ -358,6 +392,45 @@ export default function AiSettings() {
                 className="w-24 px-2 py-1 border border-slate-200 rounded text-sm"
               />
               <span className="text-xs text-slate-400">save on blur</span>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <div className="text-xs text-slate-500 uppercase mb-1">Handover webhook (Slack/Discord)</div>
+            <div className="space-y-2">
+              <input
+                type="url"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://hooks.slack.com/... atau discord.com/api/webhooks/..."
+                className="w-full px-2 py-1 text-xs border border-slate-200 rounded font-mono"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-1 text-xs text-slate-600">
+                  <input type="checkbox" checked={webhookEnabled} onChange={(e) => setWebhookEnabled(e.target.checked)} />
+                  enabled
+                </label>
+                <div className="flex gap-1">
+                  <button
+                    onClick={testWebhook}
+                    disabled={!webhookUrl || webhookTesting}
+                    className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    {webhookTesting ? '…' : 'Test'}
+                  </button>
+                  <button
+                    onClick={saveWebhook}
+                    className="text-xs px-2 py-1 rounded bg-slate-700 text-white hover:bg-slate-800"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+              {webhook?.url && (
+                <div className="text-[10px] text-slate-400 truncate" title={webhook.url}>
+                  Saved: {webhook.url.slice(0, 50)}…
+                </div>
+              )}
             </div>
           </div>
 

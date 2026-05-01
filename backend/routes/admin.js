@@ -16,6 +16,7 @@ const ALLOWED_SETTING_KEYS = new Set([
   'shadow_mode_default',
   'reply_provider',
   'ai_credentials',
+  'handover_webhook',
 ]);
 
 router.get('/settings', async (_req, res) => {
@@ -124,6 +125,13 @@ router.put('/settings/:key', async (req, res) => {
     value = n;
   } else if (key === 'shadow_mode_default') {
     value = !!value;
+  } else if (key === 'handover_webhook') {
+    if (!value || typeof value !== 'object') {
+      return res.status(400).json({ success: false, message: 'value must be object {url, enabled, reasons}' });
+    }
+    if (value.url && !/^https?:\/\//.test(value.url)) {
+      return res.status(400).json({ success: false, message: 'url must be http(s)' });
+    }
   } else if (key === 'reply_provider') {
     if (!aiClient.VALID_PROVIDERS.includes(value)) {
       return res.status(400).json({ success: false, message: `provider must be one of: ${aiClient.VALID_PROVIDERS.join(', ')}` });
@@ -159,6 +167,27 @@ router.get('/cost/today', async (_req, res) => {
 router.get('/cost/breakdown', async (_req, res) => {
   const r = await costGuard.getTodayBreakdown();
   res.json({ success: true, ...r });
+});
+
+router.post('/webhook/test', async (req, res) => {
+  const url = (req.body?.url || '').toString();
+  if (!/^https?:\/\//.test(url)) return res.status(400).json({ success: false, message: 'invalid url' });
+  try {
+    const text = '✅ Test webhook dari Tiara CRM (handover notif). Kalau pesan ini sampai, integrasi berhasil.';
+    const body = /discord\.com\/api\/webhooks/.test(url) ? { content: text } : { text };
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      return res.status(502).json({ success: false, message: `${r.status}: ${txt.slice(0, 200)}` });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(502).json({ success: false, message: err.message });
+  }
 });
 
 // ── Persona ──────────────────────────────────────────────────────────────────

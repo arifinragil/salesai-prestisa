@@ -6,9 +6,10 @@ import { api } from '@/lib/api';
 import MessageSearch from './MessageSearch';
 
 const navItems = [
-  { href: '/inbox',       label: 'Inbox' },
-  { href: '/ai-monitor',  label: 'Monitor' },
-  { href: '/ai-settings', label: 'Persona' },
+  { href: '/inbox',        label: 'Inbox' },
+  { href: '/ai-monitor',   label: 'Monitor' },
+  { href: '/ai-settings',  label: 'Persona' },
+  { href: '/sql-queries',  label: 'SQL' },
 ];
 
 export default function Layout({ children, title = 'Tiara CRM' }) {
