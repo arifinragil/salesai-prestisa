@@ -40,12 +40,22 @@ async function generateWithTools({ systemPrompt, messages, tools, executor, maxI
   let usageIn = 0, usageOut = 0;
   let iterationsCapped = false;
 
+  // Mark system + tools as cacheable so repeated calls within ~5min hit prompt cache.
+  // Persona + KB block stable; message history is the variable part.
+  const systemBlocks = systemPrompt
+    ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+    : undefined;
+  const toolsParam = tools.length
+    ? tools.map((t, idx) => idx === tools.length - 1
+        ? { ...t, cache_control: { type: 'ephemeral' } } : t)
+    : undefined;
+
   for (let i = 0; i < maxIterations + 1; i++) {
     const resp = await withRetry(() => ant.messages.create({
       model: MODEL(),
       max_tokens: MAX_TOKENS(),
-      system: systemPrompt,
-      tools: tools.length ? tools : undefined,
+      system: systemBlocks,
+      tools: toolsParam,
       messages: conversation,
     }));
 

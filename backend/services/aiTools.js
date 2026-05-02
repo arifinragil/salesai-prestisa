@@ -83,13 +83,24 @@ const declarations = [
   },
   {
     name: 'get_faq',
-    description: `Ambil teks FAQ untuk topik tertentu. Topic enum: ${listFaqTopics().join(', ')}.`,
+    description: 'Ambil teks FAQ. Pakai topic snake_case (mis: payment, refund_policy, cancel_policy, hours, lead_time, area_coverage, shipping_fee, product_type, how_to_order, invoice, about). Daftar lengkap dimanage operator di /knowledge.',
     input_schema: {
       type: 'object',
       properties: {
-        topic: { type: 'string', enum: listFaqTopics() },
+        topic: { type: 'string' },
       },
       required: ['topic'],
+    },
+  },
+  {
+    name: 'kb_search',
+    description: 'Cari KB topic berdasarkan makna pertanyaan customer (semantic search), bukan slug. Pakai jika pertanyaan customer tidak match topic slug yang ada di get_faq. Return top 3 kandidat dengan body lengkap. Pakai ini SEBELUM memutuskan handover karena "tidak tahu".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Pertanyaan customer apa adanya (bahasa natural).' },
+      },
+      required: ['query'],
     },
   },
   {
@@ -193,56 +204,68 @@ const declarations = [
 
 async function search_products({ args }) {
   const limit = clampInt(args.limit, 5, 10);
-  const where = ['p.deleted_at IS NULL', 'p.price > 0'];
-  const params = [];
 
-  if (args.category) {
-    params.push(`%${args.category}%`, `%${args.category}%`);
-    where.push(`(c.name LIKE ? OR p.name LIKE ?)`);
-  }
-  if (args.city) {
-    // Use proper geo lookup (city table is `geo`, products.city = geo.id)
-    params.push(`%${args.city}%`);
-    where.push(`g_city.name LIKE ?`);
-  }
-  if (args.budget_min) {
-    params.push(parseInt(args.budget_min));
-    where.push(`p.price >= ?`);
-  }
-  if (args.budget_max) {
-    params.push(parseInt(args.budget_max));
-    where.push(`p.price <= ?`);
-  }
-  if (args.query) {
-    params.push(`%${args.query}%`);
-    where.push(`p.name LIKE ?`);
+  function buildSql(useCity) {
+    const where = ['p.deleted_at IS NULL', 'p.price > 0'];
+    const params = [];
+    if (args.category) {
+      // category bisa multi-token (mis. "papan duka cita") — split + AND-LIKE
+      const tokens = String(args.category).toLowerCase().split(/\s+/).filter(Boolean);
+      for (const tok of tokens) {
+        params.push(`%${tok}%`, `%${tok}%`);
+        where.push(`(LOWER(c.name) LIKE ? OR LOWER(p.name) LIKE ?)`);
+      }
+    }
+    if (useCity && args.city) {
+      params.push(`%${args.city}%`);
+      where.push(`g_city.name LIKE ?`);
+    }
+    if (args.budget_min) { params.push(parseInt(args.budget_min)); where.push(`p.price >= ?`); }
+    if (args.budget_max) { params.push(parseInt(args.budget_max)); where.push(`p.price <= ?`); }
+    if (args.query) {
+      const tokens = String(args.query).toLowerCase().split(/\s+/).filter(Boolean);
+      for (const tok of tokens) { params.push(`%${tok}%`); where.push(`LOWER(p.name) LIKE ?`); }
+    }
+    const sql = `
+      SELECT p.id, p.name, COALESCE(c.name, '?') AS category,
+             p.price, p.image AS image_url, p.description,
+             g_city.name AS city,
+             COALESCE(s.total_penjualan, 0) AS total_penjualan
+      FROM products p
+      LEFT JOIN product_category_new c ON c.id = p.category_id
+      LEFT JOIN geo g_city ON g_city.id = p.city
+      LEFT JOIN (
+        SELECT order_items.product_id, COUNT(order_items.product_code) AS total_penjualan
+        FROM order_items
+        INNER JOIN purchase_order ON order_items.id = purchase_order.pr_id
+        WHERE order_items.bought > 0 AND order_items.deleted_at IS NULL AND purchase_order.deleted_at IS NULL
+        GROUP BY order_items.product_id
+      ) s ON s.product_id = p.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY total_penjualan DESC, p.id DESC
+      LIMIT ${limit}`;
+    return { sql, params };
   }
 
-  // Sales-rank subquery (same logic as the Typebot n8n workflow)
-  const sql = `
-    SELECT p.id, p.name, COALESCE(c.name, '?') AS category,
-           p.price, p.image AS image_url, p.description,
-           g_city.name AS city,
-           COALESCE(s.total_penjualan, 0) AS total_penjualan
-    FROM products p
-    LEFT JOIN product_category_new c ON c.id = p.category_id
-    LEFT JOIN geo g_city ON g_city.id = p.city
-    LEFT JOIN (
-      SELECT order_items.product_id, COUNT(order_items.product_code) AS total_penjualan
-      FROM order_items
-      INNER JOIN purchase_order ON order_items.id = purchase_order.pr_id
-      WHERE order_items.bought > 0 AND order_items.deleted_at IS NULL AND purchase_order.deleted_at IS NULL
-      GROUP BY order_items.product_id
-    ) s ON s.product_id = p.id
-    WHERE ${where.join(' AND ')}
-    ORDER BY total_penjualan DESC, p.id DESC
-    LIMIT ${limit}`;
-  const [rows] = await mysql.query(sql, params);
+  let { sql, params } = buildSql(true);
+  let [rows] = await mysql.query(sql, params);
+  let cityFallback = false;
+  // Soft fallback: city is a delivery preference, catalog might not be tagged
+  // for the exact city. Retry without city to surface nearest matches.
+  if (!rows.length && args.city) {
+    ({ sql, params } = buildSql(false));
+    [rows] = await mysql.query(sql, params);
+    cityFallback = rows.length > 0;
+  }
   if (!rows.length) {
     return { count: 0, products: [], note: 'Tidak ditemukan produk yang cocok dengan filter ini.' };
   }
   return {
     count: rows.length,
+    city_fallback: cityFallback,
+    note: cityFallback
+      ? `Tidak ada produk yang spesifik di-tag untuk kota "${args.city}", ini hasil tanpa filter kota — Prestisa kirim ke seluruh Indonesia, jadi produk ini umumnya tetap bisa dikirim ke ${args.city}.`
+      : undefined,
     products: rows.map((r) => ({
       ...r,
       description: r.description ? String(r.description).replace(/<[^>]+>/g, '').slice(0, 200) : null,
@@ -319,14 +342,30 @@ async function get_active_promos({ args }) {
   return { count: rows.length, promos: rows };
 }
 
-function get_faq({ args }) {
+async function get_faq({ args }) {
   const topic = String(args.topic || '').toLowerCase();
-  const text = getFaqTopic(topic);
-  if (!text) return { error: `topic "${topic}" tidak dikenal. Valid: ${listFaqTopics().join(', ')}` };
+  const text = await getFaqTopic(topic);
+  if (!text) {
+    const valid = await listFaqTopics();
+    return { error: `topic "${topic}" tidak dikenal. Valid: ${valid.join(', ')}` };
+  }
   return { topic, text };
 }
 
-function build_order_form_url({ args, phone }) {
+async function kb_search({ args }) {
+  const q = String(args.query || '').trim();
+  if (!q) return { error: 'query required' };
+  try {
+    const rag = require('./aiKbRag');
+    const hits = await rag.search(q, 3);
+    if (!hits.length) return { hits: [], note: 'no relevant KB topic ≥0.4 cosine — handover OK kalau tetap tidak yakin' };
+    return { hits: hits.map((h) => ({ topic: h.topic, score: Number(h.score.toFixed(3)), body: h.body })) };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+async function build_order_form_url({ args, phone, conv }) {
   const type = String(args.product_type || '').toLowerCase();
   let base;
   if (type === 'papan') base = process.env.ORDER_FORM_PAPAN_URL;
@@ -346,7 +385,40 @@ function build_order_form_url({ args, phone }) {
   if (prefill.sender_name)       params.set('sender_name', prefill.sender_name);
   if (prefill.recipient_wa)      params.set('recipient_wa', prefill.recipient_wa);
 
-  return { url: `${base}?${params.toString()}` };
+  // #1 UTM tracking — embed conv reference so we can attribute conversions
+  // back to AI conversations. Customer's filled order will land in MySQL with
+  // utm_source=tiara and we can JOIN to conv via utm_ref.
+  let utmRef = null;
+  if (conv?.id) {
+    utmRef = `t-${conv.id}-${Date.now().toString(36)}`;
+    params.set('utm_source', 'tiara');
+    params.set('utm_medium', 'whatsapp');
+    params.set('utm_campaign', 'ai-agent');
+    params.set('utm_content', utmRef);
+    // Persist on conv for later attribution
+    try {
+      const pg = require('../db/postgres');
+      await pg.query(
+        `UPDATE crm_conversations
+           SET last_order_url_sent_at = now(), last_order_url_ref = $2
+         WHERE id = $1`,
+        [conv.id, utmRef]
+      );
+      // #2 Schedule follow-up if no order in 2 hours
+      await pg.query(
+        `INSERT INTO crm_followups (conversation_id, kind, scheduled_for, body_template, context)
+         VALUES ($1, 'order_url_pending', now() + interval '2 hours', $2, $3)
+         ON CONFLICT DO NOTHING`,
+        [
+          conv.id,
+          'Halo Kak 🌸 Tadi link order udah Tiara kirim, gimana? Ada yang bisa dibantu lagi atau langsung lanjut isi formnya? Kalau ada pertanyaan, kabarin ya.',
+          JSON.stringify({ utm_ref: utmRef, product_type: type }),
+        ]
+      );
+    } catch (err) { /* non-fatal */ }
+  }
+
+  return { url: `${base}?${params.toString()}`, utm_ref: utmRef };
 }
 
 const VALID_HANDOVER_REASONS = new Set([
@@ -566,6 +638,7 @@ const executors = {
   get_shipping_info,
   get_active_promos,
   get_faq,
+  kb_search,
   build_order_form_url,
   find_customer_orders,
   get_order_status,

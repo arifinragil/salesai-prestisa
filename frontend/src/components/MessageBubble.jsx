@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { formatTimestamp } from '@/lib/format';
+import { api } from '@/lib/api';
 
 const SENDER_LABEL = {
   customer: 'Customer',
@@ -37,6 +38,19 @@ export default function MessageBubble({ message }) {
   const isInbound = message.direction === 'in';
   const meta = message.ai_metadata || null;
   const [imgError, setImgError] = useState(false);
+  const [feedback, setFeedback] = useState(message.feedback ?? null);
+  const [fbBusy, setFbBusy] = useState(false);
+
+  async function rate(score) {
+    setFbBusy(true);
+    try {
+      const next = feedback === score ? 0 : score;
+      await api(`/api/ops/messages/${message.id}/feedback`, { method: 'POST', body: { score: next } });
+      setFeedback(next === 0 ? null : next);
+    } catch (err) { alert(err.message); }
+    finally { setFbBusy(false); }
+  }
+  const showFeedback = !isInbound && message.sender_type === 'ai';
 
   const showImage = message.attachment_url
     && isImage(message.message_type, message.attachment_url)
@@ -107,15 +121,58 @@ export default function MessageBubble({ message }) {
           )}
         </div>
         <div className="flex items-center gap-2 mt-1 px-1 text-xs text-slate-400">
-          <span>{SENDER_LABEL[message.sender_type] || message.sender_type}</span>
+          <span>
+            {message.sender_type === 'staff' && (message.staff_name || message.staff_username)
+              ? `${message.staff_name || message.staff_username} (operator)`
+              : (SENDER_LABEL[message.sender_type] || message.sender_type)}
+          </span>
           <span>·</span>
           <span>{formatTimestamp(message.created_at)}</span>
           {message.shadow && <span className="status-pill status-shadow">shadow</span>}
+          {isInbound && message.sentiment && message.sentiment !== 'neutral' && (
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                message.sentiment === 'angry' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                message.sentiment === 'frustrated' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                message.sentiment === 'positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                'bg-slate-50 text-slate-600 border-slate-200'
+              }`}
+              title={`sentiment: ${message.sentiment}`}
+            >
+              {message.sentiment === 'angry' ? '😡' : message.sentiment === 'frustrated' ? '😤' : message.sentiment === 'positive' ? '😊' : ''} {message.sentiment}
+            </span>
+          )}
+          {isInbound && Array.isArray(message.pii_flags) && message.pii_flags.length > 0 && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200"
+              title={`PII terdeteksi: ${message.pii_flags.join(', ')}`}
+            >🔒 PII</span>
+          )}
           {message.send_status === 'send_failed' && (
             <span className="status-pill status-handover">send failed</span>
           )}
           {meta && (
             <span className="text-slate-400 cursor-help" title={JSON.stringify(meta, null, 2)}>ℹ</span>
+          )}
+          {showFeedback && (
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                type="button" disabled={fbBusy}
+                onClick={() => rate(1)}
+                aria-label="Reply ini bagus"
+                className={`w-6 h-6 inline-flex items-center justify-center rounded transition ${
+                  feedback === 1 ? 'bg-emerald-100 text-emerald-700' : 'text-slate-400 hover:bg-slate-100 hover:text-emerald-600'
+                }`}
+              >👍</button>
+              <button
+                type="button" disabled={fbBusy}
+                onClick={() => rate(-1)}
+                aria-label="Reply ini buruk"
+                className={`w-6 h-6 inline-flex items-center justify-center rounded transition ${
+                  feedback === -1 ? 'bg-rose-100 text-rose-700' : 'text-slate-400 hover:bg-slate-100 hover:text-rose-600'
+                }`}
+              >👎</button>
+            </div>
           )}
         </div>
       </div>

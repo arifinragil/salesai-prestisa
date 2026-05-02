@@ -20,6 +20,93 @@ function phoneToChatId(phone) {
   return `${digits}@c.us`;
 }
 
+async function getWaha(path) {
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    const e = new Error(`WAHA GET ${path} ${res.status}: ${errText.slice(0, 120)}`);
+    e.status = res.status;
+    throw e;
+  }
+  return res.json();
+}
+
+// Send WhatsApp typing indicator + seen receipt — humanizes bot signature
+// to reduce risk of WhatsApp's anti-bot detection.
+async function startTyping({ phone, session }) {
+  try {
+    await postWaha('/api/startTyping', { session: session || SESSION, chatId: phoneToChatId(phone) });
+  } catch (err) { /* non-fatal */ }
+}
+async function stopTyping({ phone, session }) {
+  try {
+    await postWaha('/api/stopTyping', { session: session || SESSION, chatId: phoneToChatId(phone) });
+  } catch (err) { /* non-fatal */ }
+}
+// Set session presence on WhatsApp ('available' = online dot visible to contacts).
+async function setPresence({ session, presence }) {
+  try {
+    await postWaha('/api/presence', {
+      session: session || SESSION,
+      presence: presence || 'available',
+    });
+  } catch (err) { /* non-fatal */ }
+}
+
+// Get session profile (name, status, pic) — for setup verification.
+async function getProfile({ session }) {
+  try {
+    return await getWaha(`/api/${encodeURIComponent(session || SESSION)}/profile`);
+  } catch (err) { return { error: err.message }; }
+}
+
+// Set profile name / status / picture URL.
+async function setProfileName({ session, name }) {
+  return postWaha(`/api/${encodeURIComponent(session || SESSION)}/profile/name`, { name });
+}
+async function setProfileStatus({ session, status }) {
+  return postWaha(`/api/${encodeURIComponent(session || SESSION)}/profile/status`, { status });
+}
+async function setProfilePicture({ session, fileUrl, mimetype }) {
+  return postWaha(`/api/${encodeURIComponent(session || SESSION)}/profile/picture`, {
+    file: { url: fileUrl, mimetype: mimetype || 'image/jpeg' },
+  });
+}
+
+async function sendSeen({ phone, messageId, session }) {
+  try {
+    await postWaha('/api/sendSeen', {
+      session: session || SESSION,
+      chatId: phoneToChatId(phone),
+      messageId: messageId || undefined,
+    });
+  } catch (err) { /* non-fatal */ }
+}
+
+async function getContact({ phone, session }) {
+  const sess = session || SESSION;
+  const chatId = phoneToChatId(phone);
+  const out = { contactId: chatId };
+  // Basic contact info (name, push name, business profile flag)
+  try {
+    const c = await getWaha(`/api/contacts?contactId=${encodeURIComponent(chatId)}&session=${encodeURIComponent(sess)}`);
+    Object.assign(out, {
+      name: c.name || c.pushname || c.shortName || null,
+      push_name: c.pushname || null,
+      short_name: c.shortName || null,
+      is_business: !!c.isBusiness,
+      is_my_contact: !!c.isMyContact,
+      number: c.number || null,
+    });
+  } catch (err) { out.contact_error = err.message; }
+  // Profile picture URL (may be null if user hides it)
+  try {
+    const pic = await getWaha(`/api/${encodeURIComponent(sess)}/contacts/profile-picture?contactId=${encodeURIComponent(chatId)}`);
+    out.profile_picture_url = pic.url || null;
+  } catch (err) { out.picture_error = err.message; }
+  return out;
+}
+
 async function postWaha(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -51,6 +138,43 @@ async function sendFile({ phone, fileUrl, mimetype, filename, caption }) {
   };
   const res = await postWaha('/api/sendFile', body);
   return { id: res.id || res._data?.id?._serialized || null, raw: res };
+}
+
+// WAHA buttons (NOWEB has limited support; some engines reject — caller should fallback).
+// rows: [{title, description?, rowId}]; sections: [{title, rows:[]}]
+async function sendButtons({ phone, header, body, footer, buttons }) {
+  // buttons: [{id, text}]
+  const payload = {
+    session: SESSION,
+    chatId: phoneToChatId(phone),
+    header: header ? { type: 'text', text: header } : undefined,
+    body: { text: body },
+    footer: footer ? { text: footer } : undefined,
+    action: {
+      buttons: buttons.map((b) => ({ type: 'reply', reply: { id: b.id, title: b.text.slice(0, 20) } })),
+    },
+  };
+  const res = await postWaha('/api/sendButtons', payload);
+  return { id: res.id || null, raw: res };
+}
+
+async function sendList({ phone, header, body, footer, buttonText, sections }) {
+  const payload = {
+    session: SESSION,
+    chatId: phoneToChatId(phone),
+    header: header ? { type: 'text', text: header } : undefined,
+    body: { text: body },
+    footer: footer ? { text: footer } : undefined,
+    action: {
+      button: buttonText || 'Pilih',
+      sections: sections.map((s) => ({
+        title: s.title,
+        rows: s.rows.map((r) => ({ rowId: r.rowId, title: r.title, description: r.description || undefined })),
+      })),
+    },
+  };
+  const res = await postWaha('/api/sendList', payload);
+  return { id: res.id || null, raw: res };
 }
 
 async function sendImage({ phone, imageUrl, caption }) {
@@ -174,4 +298,8 @@ function parseForwarder(raw) {
   };
 }
 
-module.exports = { name: 'waha', sendText, sendImage, sendFile, parseInbound };
+module.exports = {
+  name: 'waha', sendText, sendImage, sendFile, sendButtons, sendList, parseInbound, getContact,
+  startTyping, stopTyping, sendSeen, setPresence,
+  getProfile, setProfileName, setProfileStatus, setProfilePicture,
+};

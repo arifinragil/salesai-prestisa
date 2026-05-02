@@ -17,6 +17,8 @@ router.get('/conversations', async (req, res) => {
   const status = req.query.status;
   const session = req.query.wa_session;
   const search = (req.query.search || '').toString().trim().toLowerCase();
+  const queue = req.query.queue; // 'mine' | 'unassigned' | 'team'
+  const tagId = parseInt(req.query.tag_id) || null;
   const params = [];
   const where = [];
   if (status && ['active', 'closed', 'spam'].includes(status)) {
@@ -26,6 +28,16 @@ router.get('/conversations', async (req, res) => {
   if (session) {
     params.push(session);
     where.push(`conv.wa_session = $${params.length}`);
+  }
+  if (queue === 'mine') {
+    params.push(req.staff.staff_id);
+    where.push(`conv.assigned_staff_id = $${params.length}`);
+  } else if (queue === 'unassigned') {
+    where.push(`conv.assigned_staff_id IS NULL`);
+  }
+  if (tagId) {
+    params.push(tagId);
+    where.push(`EXISTS (SELECT 1 FROM crm_conversation_tags ct WHERE ct.conversation_id = conv.id AND ct.tag_id = $${params.length})`);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
@@ -38,22 +50,34 @@ router.get('/conversations', async (req, res) => {
     handover_open AS (
       SELECT conversation_id, COUNT(*)::int AS n
       FROM crm_handovers WHERE resolved_at IS NULL GROUP BY conversation_id
+    ),
+    conv_tags AS (
+      SELECT ct.conversation_id,
+             json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color, 'auto', COALESCE(ct.auto_tagged, FALSE)) ORDER BY t.name) AS tags
+      FROM crm_conversation_tags ct JOIN crm_tags t ON t.id = ct.tag_id
+      GROUP BY ct.conversation_id
     )
     SELECT conv.id, conv.phone, conv.real_phone, conv.push_name,
            conv.customer_id, conv.status, conv.ai_enabled,
            conv.ai_paused_until, conv.assigned_staff_id, conv.last_message_at,
            conv.last_intent, conv.handover_count, conv.shadow_mode, conv.wa_session,
+           conv.experiment_variant,
            lm.body AS last_body, lm.sender_type AS last_sender, lm.created_at AS last_at,
-           COALESCE(ho.n, 0) AS open_handovers
+           COALESCE(ho.n, 0) AS open_handovers,
+           COALESCE(ct.tags, '[]'::json) AS tags
     FROM crm_conversations conv
     LEFT JOIN last_msg lm ON lm.conversation_id = conv.id
     LEFT JOIN handover_open ho ON ho.conversation_id = conv.id
+    LEFT JOIN conv_tags ct ON ct.conversation_id = conv.id
     ${whereSql}
     ORDER BY COALESCE(conv.last_message_at, conv.updated_at) DESC
     LIMIT 200`;
   const { rows } = await pg.query(sql, params);
   const items = search
-    ? rows.filter((r) => (r.phone || '').includes(search))
+    ? rows.filter((r) =>
+        (r.phone || '').includes(search) ||
+        (r.real_phone || '').includes(search) ||
+        (r.push_name || '').toLowerCase().includes(search))
     : rows;
   res.json({ success: true, items });
 });
@@ -162,10 +186,13 @@ router.get('/conversations/:id/messages', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
   const { rows } = await pg.query(
-    `SELECT id, direction, sender_type, staff_id, body, message_type, attachment_url,
-            ai_metadata, shadow, send_status, created_at
-     FROM crm_messages WHERE conversation_id = $1
-     ORDER BY id ASC LIMIT 500`,
+    `SELECT m.id, m.direction, m.sender_type, m.staff_id, m.body, m.message_type, m.attachment_url,
+            m.ai_metadata, m.shadow, m.send_status, m.created_at, m.sentiment, m.pii_flags, m.feedback,
+            u.full_name AS staff_name, u.username AS staff_username
+     FROM crm_messages m
+     LEFT JOIN staff_users u ON u.id = m.staff_id
+     WHERE m.conversation_id = $1
+     ORDER BY m.id ASC LIMIT 500`,
     [id]
   );
   res.json({ success: true, messages: rows });
@@ -339,10 +366,45 @@ router.post('/conversations/:id/shadow', async (req, res) => {
   res.json({ success: true, shadow_mode: enabled });
 });
 
+// Detailed handover view — facts + last 7 turns + escalation class
+router.get('/handovers/:id/detail', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const ho = await pg.query(
+    `SELECT h.*, c.phone, c.real_phone, c.customer_id
+     FROM crm_handovers h JOIN crm_conversations c ON c.id = h.conversation_id
+     WHERE h.id = $1`, [id]
+  );
+  if (!ho.rows[0]) return res.status(404).json({ success: false, message: 'not found' });
+  const h = ho.rows[0];
+  const [turns, facts] = await Promise.all([
+    pg.query(
+      `SELECT direction, sender_type, body, created_at FROM crm_messages
+       WHERE conversation_id = $1 ORDER BY id DESC LIMIT 7`,
+      [h.conversation_id]
+    ),
+    pg.query(
+      `SELECT fact_key, fact_value FROM crm_customer_facts
+       WHERE conversation_id = $1 OR customer_id = $2
+       ORDER BY created_at DESC LIMIT 12`,
+      [h.conversation_id, h.customer_id]
+    ),
+  ]);
+  res.json({
+    success: true,
+    handover: {
+      id: h.id, reason: h.reason, brief: h.brief, detail: h.detail,
+      escalation_class: h.escalation_class, created_at: h.created_at,
+      conversation_id: h.conversation_id,
+    },
+    turns: turns.rows.reverse(),
+    facts: facts.rows,
+  });
+});
+
 router.get('/handovers', async (req, res) => {
   const onlyOpen = req.query.open !== 'false';
   const sql = `
-    SELECT h.id, h.conversation_id, h.message_id, h.reason, h.detail, h.created_at,
+    SELECT h.id, h.conversation_id, h.message_id, h.reason, h.detail, h.brief, h.created_at,
            h.resolved_at, h.resolved_by, c.phone, c.customer_id
     FROM crm_handovers h
     JOIN crm_conversations c ON c.id = h.conversation_id
@@ -397,12 +459,25 @@ router.get('/conversations/:id/customer', async (req, res) => {
         profile.email = crows[0].email;
       }
       const [stats] = await mysql.query(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS spent
+        `SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS spent,
+                COALESCE(AVG(total), 0) AS aov, MAX(created_at) AS last_order_at
          FROM \`order\` WHERE customer_id = ? AND deleted_at IS NULL`,
         [conv.customer_id]
       );
       profile.total_orders = Number(stats[0]?.n || 0);
       profile.total_spent = Number(stats[0]?.spent || 0);
+      profile.aov = Math.round(Number(stats[0]?.aov || 0));
+      profile.last_order_at = stats[0]?.last_order_at || null;
+      // Recency bucket
+      if (profile.last_order_at) {
+        const days = Math.floor((Date.now() - new Date(profile.last_order_at).getTime()) / 86400000);
+        profile.days_since_last_order = days;
+        profile.recency_bucket =
+          days <= 30  ? 'active'
+          : days <= 90 ? 'dormant'
+          : 'churned';
+      }
+
       const [recent] = await mysql.query(
         `SELECT id, order_number, status, payment_status, total, created_at
          FROM \`order\` WHERE customer_id = ? AND deleted_at IS NULL
@@ -410,6 +485,58 @@ router.get('/conversations/:id/customer', async (req, res) => {
         [conv.customer_id]
       );
       profile.recent_orders = recent;
+
+      // Recipient address book (top 6 by frequency)
+      const [recipients] = await mysql.query(
+        `SELECT oi.receiver_name AS name, g.name AS city,
+                COUNT(*) AS times, MAX(oi.date_time) AS last_at
+         FROM order_items oi
+         JOIN \`order\` o ON o.id = oi.order_id
+         LEFT JOIN geo g ON g.id = oi.city
+         WHERE o.customer_id = ? AND o.deleted_at IS NULL AND oi.deleted_at IS NULL
+           AND oi.receiver_name IS NOT NULL AND oi.receiver_name != ''
+         GROUP BY oi.receiver_name, g.name
+         ORDER BY times DESC, last_at DESC LIMIT 6`,
+        [conv.customer_id]
+      );
+      profile.recipients = recipients;
+
+      // Customer health score
+      try {
+        const h = await pg.query(
+          `SELECT score, band, computed_at FROM crm_customer_health WHERE customer_id = $1`,
+          [conv.customer_id]
+        );
+        if (h.rows[0]) profile.health = h.rows[0];
+      } catch {}
+
+      // Customer facts
+      try {
+        const f = await pg.query(
+          `SELECT fact_key, fact_value, created_at FROM crm_customer_facts
+           WHERE conversation_id = $1 OR customer_id = $2
+           ORDER BY created_at DESC LIMIT 30`,
+          [conv.id, conv.customer_id]
+        );
+        const dedup = {};
+        for (const row of f.rows) if (!dedup[row.fact_key]) dedup[row.fact_key] = row;
+        profile.facts = Object.values(dedup);
+      } catch {}
+
+      // Top product categories
+      const [categories] = await mysql.query(
+        `SELECT COALESCE(c.name, '?') AS category,
+                COUNT(*) AS times,
+                COALESCE(SUM(oi.subtotal), 0) AS total
+         FROM order_items oi
+         JOIN \`order\` o ON o.id = oi.order_id
+         LEFT JOIN products p ON p.id = oi.product_id
+         LEFT JOIN product_category_new c ON c.id = p.category_id
+         WHERE o.customer_id = ? AND o.deleted_at IS NULL AND oi.deleted_at IS NULL
+         GROUP BY category ORDER BY times DESC LIMIT 5`,
+        [conv.customer_id]
+      );
+      profile.top_categories = categories;
     } catch (err) {
       logger.warn({ err: err.message, convId: id }, '[inbox.customer] mysql lookup failed');
     }
@@ -424,6 +551,155 @@ router.get('/conversations/:id/customer', async (req, res) => {
     },
     profile,
   });
+});
+
+// #5 Inline AI rewriter — operator drafts reply, AI refine tone & clarity
+router.post('/conversations/:id/rewrite', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const draft = (req.body?.draft || '').toString().trim();
+  const tone = req.body?.tone || 'sopan'; // sopan | formal | santai | empathic
+  if (!draft) return res.status(400).json({ success: false, message: 'draft required' });
+
+  const ctx = await loadConvContext(id, 6);
+  if (!ctx) return res.status(404).json({ success: false, message: 'conv not found' });
+  const transcript = (ctx.messages || []).slice(-6).map((m) =>
+    `${m.direction === 'in' ? 'Customer' : 'Op'}: ${(m.body || '').slice(0, 200)}`
+  ).join('\n');
+
+  const prompt = `Sebagai asisten CS Prestisa (toko bunga online), perbaiki draft reply operator berikut. Pertahankan inti pesan, perhalus tone (${tone}), perbaiki tata bahasa Indonesia, tambahkan sapaan/penutup yang natural. JANGAN tambah informasi baru/janji yang tidak ada di draft. Output cuma teks reply yang sudah diperbaiki, tanpa preamble.
+
+=== KONTEKS PERCAKAPAN ===
+${transcript}
+=== DRAFT OPERATOR ===
+${draft}
+=== END ===`;
+
+  try {
+    const result = await aiClient.generateWithTools({
+      systemPrompt: 'Kamu copy editor bahasa Indonesia. Output: hanya teks reply yang sudah diperbaiki, tanpa quote/tanda kutip/preamble.',
+      messages: [{ role: 'user', content: prompt }],
+      tools: [], executor: async () => ({ unsupported: true }), maxIterations: 1,
+    });
+    res.json({ success: true, rewritten: (result.text || '').trim() });
+  } catch (err) {
+    res.status(502).json({ success: false, message: err.message });
+  }
+});
+
+// #8 Snooze conversation — operator parks for X hours
+// Catalog product search — operator picker in chat composer
+router.get('/products/search', async (req, res) => {
+  const mysql = require('../db/mysql');
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const limit = Math.min(parseInt(req.query.limit) || 12, 50);
+  const where = ['p.deleted_at IS NULL', 'p.active = 1'];
+  const params = [];
+  if (q) {
+    for (const t of q.split(/\s+/).filter(Boolean).slice(0, 5)) {
+      params.push(`%${t}%`, `%${t}%`);
+      where.push('(LOWER(p.name) LIKE ? OR LOWER(c.name) LIKE ?)');
+    }
+  }
+  try {
+    const [rows] = await mysql.query(
+      `SELECT p.id, p.name, p.price, p.image AS image_url, COALESCE(c.name,'?') AS category
+       FROM products p
+       LEFT JOIN product_category_new c ON c.id = p.category_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY p.id DESC LIMIT ${limit}`,
+      params
+    );
+    res.json({ success: true, items: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Send product card (image + caption) — operator-driven
+router.post('/conversations/:id/send-product', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const productId = parseInt(req.body?.product_id);
+  if (!id || !productId) return res.status(400).json({ success: false, message: 'id + product_id required' });
+  const mysql = require('../db/mysql');
+  const [rows] = await mysql.query(
+    `SELECT id, name, price, image FROM products WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+    [productId]
+  );
+  const p = rows[0];
+  if (!p) return res.status(404).json({ success: false, message: 'product not found' });
+  const conv = await pg.query(`SELECT phone, wa_session FROM crm_conversations WHERE id = $1`, [id]);
+  if (!conv.rows[0]) return res.status(404).json({ success: false, message: 'conv not found' });
+  const caption = `🌷 ${p.name}\nHarga: Rp ${Number(p.price).toLocaleString('id-ID')}\n\nMau dipilih ini Kak?`;
+  const wa = require('../services/waClient');
+  try {
+    const sent = await wa.sendImage({
+      phone: conv.rows[0].phone, imageUrl: p.image, caption,
+      session: conv.rows[0].wa_session,
+    });
+    await pg.query(
+      `INSERT INTO crm_messages (conversation_id, direction, sender_type, staff_id, body, message_type, attachment_url, send_status, waha_message_id, ai_metadata)
+       VALUES ($1, 'out', 'staff', $2, $3, 'image', $4, 'sent', $5, $6)`,
+      [id, req.staff.staff_id, caption, p.image, sent?.id || null, JSON.stringify({ product_id: p.id, source: 'catalog_picker' })]
+    );
+    notify.notifyMessage({ conversation_id: id, message: { conversation_id: id, body: caption, direction: 'out', sender_type: 'staff', message_type: 'image', attachment_url: p.image } });
+    res.json({ success: true, product: p });
+  } catch (err) {
+    res.status(502).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/conversations/:id/snooze', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const hours = parseInt(req.body?.hours);
+  const note = (req.body?.note || '').toString().slice(0, 500) || null;
+  if (!id || !hours || hours < 1 || hours > 720) {
+    return res.status(400).json({ success: false, message: 'hours 1-720 required' });
+  }
+  await pg.query(
+    `UPDATE crm_conversations
+       SET snoozed_until = now() + ($2 || ' hours')::interval,
+           snoozed_by = $3, snoozed_note = $4, updated_at = now()
+     WHERE id = $1`,
+    [id, String(hours), req.staff.staff_id, note]
+  );
+  notify.notifyConvUpdated(id);
+  res.json({ success: true });
+});
+router.post('/conversations/:id/unsnooze', async (req, res) => {
+  const id = parseInt(req.params.id);
+  await pg.query(
+    `UPDATE crm_conversations SET snoozed_until = NULL, snoozed_by = NULL, snoozed_note = NULL WHERE id = $1`,
+    [id]
+  );
+  notify.notifyConvUpdated(id);
+  res.json({ success: true });
+});
+
+// Pull WhatsApp contact info (display name, profile pic, business flag) from
+// WAHA on demand. Operator clicks "Pull WA contact" in the customer panel.
+router.get('/conversations/:id/wa-contact', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const { rows } = await pg.query(
+    `SELECT phone, wa_session FROM crm_conversations WHERE id = $1`, [id]
+  );
+  const conv = rows[0];
+  if (!conv) return res.status(404).json({ success: false, message: 'not found' });
+  try {
+    const info = await waClient.getContact({ phone: conv.phone, session: conv.wa_session });
+    // Persist push_name if WAHA returned a better one and we don't have it stored
+    if (info.push_name || info.name) {
+      const pushName = info.push_name || info.name;
+      await pg.query(
+        `UPDATE crm_conversations SET push_name = COALESCE(push_name, $2) WHERE id = $1`,
+        [id, pushName]
+      );
+    }
+    res.json({ success: true, info });
+  } catch (err) {
+    res.status(502).json({ success: false, message: err.message });
+  }
 });
 
 // ── AI helpers untuk operator (suggest reply + summary) ────────────────────
@@ -536,6 +812,97 @@ ${transcript}`,
     logger.error({ err: err.message, convId: id }, '[ai-summary] failed');
     res.status(502).json({ success: false, message: err.message });
   }
+});
+
+// Self-assign or unassign a conversation (queue management)
+router.post('/conversations/:id/assign', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const target = req.body?.staff_id;
+  let assignedTo = null;
+  if (target === 'me' || target === undefined) assignedTo = req.staff.staff_id;
+  else if (target === null) assignedTo = null;
+  else assignedTo = parseInt(target) || null;
+  await pg.query(
+    `UPDATE crm_conversations SET assigned_staff_id = $2, updated_at = now() WHERE id = $1`,
+    [id, assignedTo]
+  );
+  notify.notifyConvUpdated(id);
+  res.json({ success: true, assigned_staff_id: assignedTo });
+});
+
+// ── CSAT collection ─────────────────────────────────────────────────────────
+// Send CSAT prompt to customer (manual trigger from chat UI)
+router.post('/conversations/:id/csat-request', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
+  const { rows } = await pg.query(
+    `SELECT id, phone, wa_session FROM crm_conversations WHERE id = $1`, [id]
+  );
+  const conv = rows[0];
+  if (!conv) return res.status(404).json({ success: false, message: 'conv not found' });
+
+  const body = `Halo Kak 🙏 Boleh kasih rating pengalaman chat tadi? Balas angka 1-5 ya:\n5 ⭐⭐⭐⭐⭐ Sangat puas\n4 ⭐⭐⭐⭐ Puas\n3 ⭐⭐⭐ Biasa\n2 ⭐⭐ Kurang\n1 ⭐ Tidak puas`;
+  try {
+    const sent = await waClient.sendText({ phone: conv.phone, text: body, session: conv.wa_session });
+    await pg.query(
+      `INSERT INTO crm_messages (conversation_id, direction, sender_type, body, message_type, send_status, waha_message_id)
+       VALUES ($1, 'out', 'system', $2, 'text', 'sent', $3)`,
+      [id, body, sent?.id || null]
+    );
+    notify.notifyConvUpdated(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// List recent CSAT scores (for monitor dashboard)
+router.get('/csat/recent', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const { rows } = await pg.query(
+    `SELECT cs.id, cs.conversation_id, cs.score, cs.comment, cs.collected_at, c.phone
+     FROM crm_csat cs JOIN crm_conversations c ON c.id = cs.conversation_id
+     ORDER BY cs.collected_at DESC LIMIT $1`, [limit]
+  );
+  const stats = await pg.query(
+    `SELECT AVG(score)::numeric(3,2) AS avg, COUNT(*) AS total,
+            SUM(CASE WHEN score >= 4 THEN 1 ELSE 0 END) AS satisfied,
+            SUM(CASE WHEN score <= 2 THEN 1 ELSE 0 END) AS unsatisfied
+     FROM crm_csat WHERE collected_at > now() - interval '30 days'`
+  );
+  res.json({ success: true, items: rows, stats_30d: stats.rows[0] });
+});
+
+// ── Bulk + queue filters ────────────────────────────────────────────────────
+router.post('/conversations/bulk', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((n) => parseInt(n)).filter(Boolean) : [];
+  const action = req.body?.action;
+  const tagId = parseInt(req.body?.tag_id) || null;
+  if (!ids.length || !action) return res.status(400).json({ success: false, message: 'ids and action required' });
+  if (!['close', 'reopen', 'tag', 'untag', 'shadow_on', 'shadow_off'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'unknown action' });
+  }
+  let affected = 0;
+  if (action === 'close') {
+    const r = await pg.query(`UPDATE crm_conversations SET status='closed', updated_at=now() WHERE id = ANY($1::int[])`, [ids]);
+    affected = r.rowCount;
+  } else if (action === 'reopen') {
+    const r = await pg.query(`UPDATE crm_conversations SET status='active', updated_at=now() WHERE id = ANY($1::int[])`, [ids]);
+    affected = r.rowCount;
+  } else if (action === 'shadow_on' || action === 'shadow_off') {
+    const r = await pg.query(`UPDATE crm_conversations SET shadow_mode=$2, updated_at=now() WHERE id = ANY($1::int[])`, [ids, action === 'shadow_on']);
+    affected = r.rowCount;
+  } else if (action === 'tag' && tagId) {
+    for (const id of ids) {
+      await pg.query(`INSERT INTO crm_conversation_tags (conversation_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, tagId]);
+      affected++;
+    }
+  } else if (action === 'untag' && tagId) {
+    const r = await pg.query(`DELETE FROM crm_conversation_tags WHERE tag_id=$2 AND conversation_id = ANY($1::int[])`, [ids, tagId]);
+    affected = r.rowCount;
+  }
+  ids.forEach((id) => notify.notifyConvUpdated(id));
+  res.json({ success: true, affected });
 });
 
 router.post('/handovers/:id/resolve', async (req, res) => {

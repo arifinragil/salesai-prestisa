@@ -213,6 +213,13 @@ export default function AiSettings() {
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-6">
         <h1 className="text-lg font-semibold text-slate-800">Persona & Settings</h1>
 
+        <OpsSettingsCard
+          getSetting={getSetting}
+          saveSetting={saveSetting}
+          mutateSettings={() => settings.mutate()}
+          toast={toast}
+        />
+
         {/* AI Provider */}
         <div className="bg-white border border-slate-200 rounded-lg p-5">
           <div className="flex items-center justify-between mb-3">
@@ -524,5 +531,163 @@ export default function AiSettings() {
         </div>
       </div>
     </Layout>
+  );
+}
+
+function ChannelInput({ label, hint, value, onChange, onTest, testing, canTest }) {
+  return (
+    <label className="text-xs text-slate-600 space-y-1 block">
+      <div>{label} <span className="text-slate-400">— {hint}</span></div>
+      <div className="flex gap-1">
+        <input value={value} onChange={(e) => onChange(e.target.value)}
+          placeholder="(kosong = pakai default)"
+          className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono" />
+        <button type="button" onClick={onTest} disabled={testing || !canTest}
+          className="text-xs px-2 py-1.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-40">
+          {testing ? '…' : 'Test'}
+        </button>
+      </div>
+    </label>
+  );
+}
+
+function OpsSettingsCard({ getSetting, saveSetting, mutateSettings, toast }) {
+  const [tgToken, setTgToken] = useState('');
+  const [tgChat, setTgChat] = useState('');
+  const [tgChatSla, setTgChatSla] = useState('');
+  const [tgChatAnomaly, setTgChatAnomaly] = useState('');
+  const [tgChatBrief, setTgChatBrief] = useState('');
+  const [sla, setSla] = useState('15');
+  const [briefEnabled, setBriefEnabled] = useState(true);
+  const [briefTime, setBriefTime] = useState('09:00');
+  const [anomalyEnabled, setAnomalyEnabled] = useState(true);
+  const [claimMin, setClaimMin] = useState('5');
+  const [spamEnabled, setSpamEnabled] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (hydrated) return;
+    setTgToken(getSetting('telegram_bot_token', '') || '');
+    setTgChat(getSetting('telegram_chat_id', '') || '');
+    setTgChatSla(getSetting('telegram_chat_sla', '') || '');
+    setTgChatAnomaly(getSetting('telegram_chat_anomaly', '') || '');
+    setTgChatBrief(getSetting('telegram_chat_brief', '') || '');
+    setSla(String(getSetting('sla_handover_minutes', 15) ?? 15));
+    setBriefEnabled(getSetting('daily_brief_enabled', true) !== false);
+    setBriefTime(getSetting('daily_brief_time', '09:00') || '09:00');
+    setAnomalyEnabled(getSetting('anomaly_alerts_enabled', true) !== false);
+    setClaimMin(String(getSetting('claim_lease_minutes', 5) ?? 5));
+    setSpamEnabled(getSetting('spam_filter_enabled', true) !== false);
+    setHydrated(true);
+  }, [getSetting, hydrated]);
+
+  async function saveAll() {
+    try {
+      await saveSetting('telegram_bot_token', tgToken.trim());
+      await saveSetting('telegram_chat_id', tgChat.trim());
+      await saveSetting('telegram_chat_sla', tgChatSla.trim());
+      await saveSetting('telegram_chat_anomaly', tgChatAnomaly.trim());
+      await saveSetting('telegram_chat_brief', tgChatBrief.trim());
+      await saveSetting('sla_handover_minutes', parseInt(sla) || 15);
+      await saveSetting('daily_brief_enabled', !!briefEnabled);
+      await saveSetting('daily_brief_time', briefTime || '09:00');
+      await saveSetting('anomaly_alerts_enabled', !!anomalyEnabled);
+      await saveSetting('claim_lease_minutes', parseInt(claimMin) || 5);
+      await saveSetting('spam_filter_enabled', !!spamEnabled);
+      mutateSettings();
+      toast.success('Ops settings saved');
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function testTelegram(kind) {
+    setTesting(kind || 'default');
+    try {
+      const r = await api('/api/admin/telegram/test', { method: 'POST', body: kind ? { kind } : {} });
+      toast.success(`Bot @${r.bot.username} OK — kirim ke ${r.chat_id}`);
+    } catch (e) { toast.error('Telegram test gagal: ' + e.message); }
+    finally { setTesting(false); }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-5">
+      <h2 className="text-sm font-semibold text-slate-700">Operasional & Notifikasi</h2>
+
+      <div>
+        <h3 className="text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wide">Telegram bot (alert + daily brief)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label className="text-xs text-slate-600 space-y-1">
+            <div>Bot token <span className="text-slate-400">(dari @BotFather)</span></div>
+            <input value={tgToken} onChange={(e) => setTgToken(e.target.value)}
+              placeholder="123456:ABC..." spellCheck={false}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded font-mono" />
+          </label>
+          <label className="text-xs text-slate-600 space-y-1">
+            <div>Chat ID default <span className="text-slate-400">(fallback semua jenis)</span></div>
+            <div className="flex gap-1">
+              <input value={tgChat} onChange={(e) => setTgChat(e.target.value)}
+                placeholder="-1001234567890 atau 987654321"
+                className="flex-1 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono" />
+              <button type="button" onClick={() => testTelegram(null)} disabled={testing || !tgToken.trim() || !tgChat.trim()}
+                className="text-xs px-2 py-1.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50">
+                {testing === 'default' ? '…' : 'Test'}
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <ChannelInput label="🚨 SLA breach" hint="Tim operator" value={tgChatSla} onChange={setTgChatSla}
+            onTest={() => testTelegram('sla')} testing={testing === 'sla'} canTest={!!tgToken.trim()} />
+          <ChannelInput label="📈 Anomaly alert" hint="Tim oncall/dev" value={tgChatAnomaly} onChange={setTgChatAnomaly}
+            onTest={() => testTelegram('anomaly')} testing={testing === 'anomaly'} canTest={!!tgToken.trim()} />
+          <ChannelInput label="📊 Daily brief" hint="Owner / manajemen" value={tgChatBrief} onChange={setTgChatBrief}
+            onTest={() => testTelegram('brief')} testing={testing === 'brief'} canTest={!!tgToken.trim()} />
+        </div>
+        <div className="mt-2 text-[11px] text-slate-400">
+          Field channel-specific kosong → fallback ke Chat ID default. Tip: dapatkan chat ID via <code>@userinfobot</code> di Telegram.
+        </div>
+      </div>
+
+      <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label className="text-xs text-slate-600 space-y-1">
+          <div>SLA handover (menit)</div>
+          <input type="number" min={1} max={1440} value={sla} onChange={(e) => setSla(e.target.value)}
+            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded" />
+          <div className="text-[10px] text-slate-400">Handover open lebih lama dari ini → Telegram alert.</div>
+        </label>
+        <label className="text-xs text-slate-600 space-y-1">
+          <div>Claim lease (menit)</div>
+          <input type="number" min={1} max={120} value={claimMin} onChange={(e) => setClaimMin(e.target.value)}
+            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded" />
+          <div className="text-[10px] text-slate-400">Operator yang claim conv punya hak balas selama X menit.</div>
+        </label>
+        <label className="text-xs text-slate-600 space-y-1">
+          <div>Daily brief jam</div>
+          <input type="time" value={briefTime} onChange={(e) => setBriefTime(e.target.value)}
+            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded" />
+          <div className="text-[10px] text-slate-400">Cron tetap pakai jam ini sebagai panduan (set juga di /etc/cron.d).</div>
+        </label>
+      </div>
+
+      <div className="border-t border-slate-100 pt-4 flex flex-wrap gap-4">
+        <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+          <input type="checkbox" checked={briefEnabled} onChange={(e) => setBriefEnabled(e.target.checked)} /> Daily brief enabled
+        </label>
+        <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+          <input type="checkbox" checked={anomalyEnabled} onChange={(e) => setAnomalyEnabled(e.target.checked)} /> Anomaly alerts
+        </label>
+        <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+          <input type="checkbox" checked={spamEnabled} onChange={(e) => setSpamEnabled(e.target.checked)} /> Spam filter
+        </label>
+      </div>
+
+      <div className="border-t border-slate-100 pt-4 flex justify-end">
+        <button onClick={saveAll}
+          className="text-sm px-4 py-2 rounded-md bg-brand-500 text-white hover:bg-brand-600">
+          Simpan Ops settings
+        </button>
+      </div>
+    </div>
   );
 }

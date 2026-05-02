@@ -6,10 +6,16 @@ import { api } from '@/lib/api';
 import MessageSearch from './MessageSearch';
 
 const navItems = [
-  { href: '/inbox',        label: 'Inbox',   short: 'Inbox' },
-  { href: '/ai-monitor',   label: 'Monitor', short: 'Monitor' },
-  { href: '/ai-settings',  label: 'Persona', short: 'Persona' },
-  { href: '/sql-queries',  label: 'SQL',     short: 'SQL' },
+  { href: '/inbox',           label: 'Inbox',     short: 'Inbox' },
+  { href: '/ai-monitor',      label: 'Monitor',   short: 'Monitor' },
+  { href: '/ai-settings',     label: 'Persona',   short: 'Persona' },
+  { href: '/knowledge',       label: 'Knowledge', short: 'KB' },
+  { href: '/reply-templates', label: 'Templates', short: 'Tmpl' },
+  { href: '/tags',            label: 'Tags',      short: 'Tags' },
+  { href: '/promos',          label: 'Promo',     short: 'Promo' },
+  { href: '/sql-queries',     label: 'SQL',       short: 'SQL' },
+  { href: '/users',           label: 'Users',     short: 'Users' },
+  { href: '/snippets',        label: 'Snippets',  short: 'Snip' },
 ];
 
 function isActive(pathname, href) {
@@ -42,6 +48,16 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
     router.events.on('routeChangeStart', close);
     return () => router.events.off('routeChangeStart', close);
   }, [router.events]);
+
+  // Presence heartbeat — ping every 45s when logged in
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const beat = () => { if (!cancelled) api('/api/users/me/heartbeat', { method: 'POST' }).catch(() => {}); };
+    beat();
+    const t = setInterval(beat, 45_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [user?.id || user?.username]);
 
   async function logout() {
     try { await api('/api/auth/logout', { method: 'POST' }); } catch {}

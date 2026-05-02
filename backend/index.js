@@ -14,6 +14,9 @@ const webhookRoutes = require('./routes/webhook');
 const inboxRoutes = require('./routes/inbox');
 const adminRoutes = require('./routes/admin');
 const wahaAdminRoutes = require('./routes/wahaAdmin');
+const operatorToolsRoutes = require('./routes/operatorTools');
+const usersRoutes = require('./routes/users');
+const funnelRoutes = require('./routes/funnel');
 const healthRoutes = require('./routes/health');
 
 const aiAgent = require('./services/aiAgent');
@@ -47,6 +50,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/waha', wahaAdminRoutes);
+app.use('/api/ops', operatorToolsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/funnel', funnelRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 
@@ -57,12 +63,27 @@ app.use((err, _req, res, _next) => {
 
 attachSocket(io);
 
+async function hydrateGlobalToggle() {
+  try {
+    const settingsSvc = require('./services/settings');
+    const stored = await settingsSvc.getSetting('ai_global_enabled', null);
+    if (stored != null) {
+      process.env.AI_GLOBAL_ENABLED = stored ? 'true' : 'false';
+      logger.info({ ai_global_enabled: stored }, 'hydrated AI global toggle from DB');
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'failed to hydrate AI global toggle (using env default)');
+  }
+}
+
 function startBackgroundJobs() {
   if (process.env.DISABLE_WORKER === 'true') {
     logger.info('worker disabled (DISABLE_WORKER=true)');
     return;
   }
-  aiAgent.startWorker().catch((err) => logger.error({ err: err.message }, 'worker crashed'));
+  hydrateGlobalToggle().finally(() => {
+    aiAgent.startWorker().catch((err) => logger.error({ err: err.message }, 'worker crashed'));
+  });
   setInterval(() => {
     aiAgent.reapStaleLocks().catch((err) => logger.warn({ err: err.message }, 'reapStaleLocks failed'));
   }, 60_000);

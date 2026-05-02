@@ -85,10 +85,68 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     );
     const msg = msgQ.rows[0];
 
+    // #9 Spam filter — block first-time abusers BEFORE queueing AI work
+    let spamSkipped = false;
+    try {
+      const spam = require('../services/spamFilter');
+      const r = await spam.check(client, { phone: conv.phone, body: parsed.body, conversationId: conv.id });
+      if (r.spam) {
+        spamSkipped = true;
+        await client.query(
+          `UPDATE crm_conversations SET ai_enabled = FALSE WHERE id = $1`, [conv.id]
+        );
+        // Insert advisory handover so it surfaces in dashboard
+        await client.query(
+          `INSERT INTO crm_handovers (conversation_id, message_id, reason, detail)
+           VALUES ($1, $2, 'other', $3)`,
+          [conv.id, msg.id, `spam_block: ${r.reason}${r.pattern ? ' ('+r.pattern+')' : ''}`]
+        );
+      }
+    } catch {}
+    if (spamSkipped) {
+      await client.query('COMMIT');
+      const io = req.app.get('io');
+      if (io) io.emit('crm:message', { conversation_id: conv.id, message: { id: msg.id, conversation_id: conv.id, body: parsed.body, direction: 'in', sender_type: 'customer' } });
+      return res.json({ success: true, conversation_id: conv.id, message_id: msg.id, spam_blocked: true });
+    }
+
+    // Debounce: process_after = now()+10s. If sibling pending jobs exist for
+    // this conv, push them forward to the same time so the worker picks only
+    // the latest one and treats the burst as a single user turn.
+    const debounceSec = parseInt(process.env.INBOUND_DEBOUNCE_SEC) || 10;
     await client.query(
-      `INSERT INTO crm_inbound_queue (message_id, conversation_id) VALUES ($1, $2)`,
-      [msg.id, conv.id]
+      `INSERT INTO crm_inbound_queue (message_id, conversation_id, process_after)
+       VALUES ($1, $2, now() + ($3 || ' seconds')::interval)`,
+      [msg.id, conv.id, String(debounceSec)]
     );
+    await client.query(
+      `UPDATE crm_inbound_queue
+         SET process_after = now() + ($2 || ' seconds')::interval
+       WHERE conversation_id = $1 AND status = 'pending'`,
+      [conv.id, String(debounceSec)]
+    );
+
+    // CSAT auto-capture: if last outbound was a CSAT prompt and inbound is a
+    // single 1-5 digit, record score and short-circuit (skip queueing AI reply).
+    let csatRecorded = false;
+    if (parsed.body && /^[1-5]$/.test(parsed.body.trim())) {
+      const lastOut = await client.query(
+        `SELECT body, created_at FROM crm_messages
+         WHERE conversation_id = $1 AND direction = 'out'
+         ORDER BY id DESC LIMIT 1`, [conv.id]
+      );
+      const lo = lastOut.rows[0];
+      if (lo && /rating pengalaman chat|CSAT/i.test(lo.body || '') &&
+          (Date.now() - new Date(lo.created_at).getTime()) < 24 * 3600_000) {
+        await client.query(
+          `INSERT INTO crm_csat (conversation_id, score) VALUES ($1, $2)`,
+          [conv.id, parseInt(parsed.body.trim())]
+        );
+        // Don't queue AI reply for CSAT digits — operator can thank manually.
+        await client.query(`DELETE FROM crm_inbound_queue WHERE message_id = $1`, [msg.id]);
+        csatRecorded = true;
+      }
+    }
 
     await client.query('COMMIT');
 

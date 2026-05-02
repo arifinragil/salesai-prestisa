@@ -17,11 +17,28 @@ export default function ChatDetail() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [rewriting, setRewriting] = useState(false);
+  const [aiOriginal, setAiOriginal] = useState(null); // last AI-suggested or AI-rewritten text
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogSending, setCatalogSending] = useState(null);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplFilter, setTplFilter] = useState('');
+  const [panelOpen, setPanelOpen] = useState(false);
   const fileInputRef = useRef(null);
+
+  const { data: tplData } = useSWR('/api/ops/reply-templates', fetcher);
+  const { data: snipData } = useSWR('/api/users/me/snippets', fetcher);
+  const allTemplates = [
+    ...((snipData?.items || []).map((s) => ({ ...s, scope: 'me', category: 'pribadi' }))),
+    ...(tplData?.items || []).map((t) => ({ ...t, scope: 'global' })),
+  ];
+  const quickChips = allTemplates.slice(0, 8);
 
   const conv = useSWR(id ? `/api/inbox/conversations` : null, fetcher, { refreshInterval: 0 });
   const me = useSWR('/api/auth/me', fetcher, { revalidateOnFocus: false, shouldRetryOnError: false });
@@ -35,6 +52,12 @@ export default function ChatDetail() {
     fetcher,
     { refreshInterval: 30_000 }
   );
+  const claim = useSWR(
+    id ? `/api/users/conversations/${id}/claim` : null,
+    fetcher,
+    { refreshInterval: 30_000 }
+  );
+  const onlineUsers = useSWR('/api/users/online', fetcher, { refreshInterval: 30_000 });
 
   // Live message append on Socket.IO event
   useSocket(
@@ -68,8 +91,12 @@ export default function ChatDetail() {
     setSending(true);
     try {
       await api(`/api/inbox/conversations/${id}/send`, { method: 'POST', body: { body } });
+      // Log operator correction if AI suggestion was the seed
+      if (aiOriginal && aiOriginal !== body) {
+        api('/api/ops/ai-corrections', { method: 'POST', body: { conversation_id: id, ai_suggested: aiOriginal, operator_sent: body } }).catch(() => {});
+      }
+      setAiOriginal(null);
       setDraft('');
-      // Live event will append the message; also revalidate as a backstop
       messages.mutate();
     } catch (err) {
       toast.error(err.message || 'Gagal kirim');
@@ -97,6 +124,7 @@ export default function ChatDetail() {
         toast.error('AI tidak menghasilkan saran');
       } else {
         setDraft(text);
+        setAiOriginal(text);
         const tools = (r.tools_used || []).map((t) => t.name).join(', ');
         toast.success(tools ? `Saran AI siap (tools: ${tools})` : 'Saran AI siap');
       }
@@ -106,6 +134,66 @@ export default function ChatDetail() {
       setSuggesting(false);
     }
   }, [id, toast]);
+
+  const rewriteDraft = useCallback(async (tone = 'sopan') => {
+    const body = draft.trim();
+    if (!body) { toast.error('Tulis draft dulu'); return; }
+    setRewriting(true);
+    try {
+      const r = await api(`/api/inbox/conversations/${id}/rewrite`, { method: 'POST', body: { draft: body, tone } });
+      const text = (r.rewritten || '').trim();
+      if (!text) toast.error('AI tidak menghasilkan revisi');
+      else { setDraft(text); setAiOriginal(text); toast.success('Draft diperhalus'); }
+    } catch (err) { toast.error('Rewrite gagal: ' + err.message); }
+    finally { setRewriting(false); }
+  }, [draft, id, toast]);
+
+  const doSnooze = useCallback(async (hours) => {
+    setSnoozeOpen(false);
+    try {
+      await api(`/api/inbox/conversations/${id}/snooze`, { method: 'POST', body: { hours } });
+      toast.success(`Snooze ${hours}j`);
+      conv.mutate();
+    } catch (err) { toast.error('Snooze gagal: ' + err.message); }
+  }, [id, conv, toast]);
+
+  const sendProduct = useCallback(async (productId) => {
+    setCatalogSending(productId);
+    try {
+      await api(`/api/inbox/conversations/${id}/send-product`, { method: 'POST', body: { product_id: productId } });
+      toast.success('Produk dikirim');
+      messages.mutate();
+      setCatalogOpen(false);
+    } catch (err) { toast.error('Gagal kirim produk: ' + err.message); }
+    finally { setCatalogSending(null); }
+  }, [id, messages, toast]);
+
+  const doClaim = useCallback(async () => {
+    try {
+      await api(`/api/users/conversations/${id}/claim`, { method: 'POST' });
+      toast.success('Conv di-claim');
+      claim.mutate();
+    } catch (err) {
+      toast.error(err.message);
+      claim.mutate();
+    }
+  }, [id, claim, toast]);
+
+  const doRelease = useCallback(async () => {
+    try {
+      await api(`/api/users/conversations/${id}/release`, { method: 'POST' });
+      toast.success('Claim dilepas');
+      claim.mutate();
+    } catch (err) { toast.error(err.message); }
+  }, [id, claim, toast]);
+
+  const doUnsnooze = useCallback(async () => {
+    try {
+      await api(`/api/inbox/conversations/${id}/unsnooze`, { method: 'POST' });
+      toast.success('Snooze dibuka');
+      conv.mutate();
+    } catch (err) { toast.error(err.message); }
+  }, [id, conv, toast]);
 
   const summarizeChat = useCallback(async () => {
     setSummaryLoading(true);
@@ -161,6 +249,7 @@ export default function ChatDetail() {
   if (!id) return null;
   const status = convData ? convStatusLabel(convData) : null;
   const isPaused = convData?.ai_paused_until && new Date(convData.ai_paused_until) > new Date();
+  const isSnoozed = convData?.snoozed_until && new Date(convData.snoozed_until) > new Date();
 
   return (
     <Layout title={`Chat ${convData?.phone || ''} — Tiara`}>
@@ -193,6 +282,11 @@ export default function ChatDetail() {
                 {convData?.last_intent && (
                   <span className="text-[10px] text-slate-400 hidden sm:inline">· {convData.last_intent}</span>
                 )}
+                {isSnoozed && (
+                  <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+                    💤 snooze s/d {new Date(convData.snoozed_until).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                  </span>
+                )}
               </div>
               <div className="text-[11px] text-slate-400 mt-0.5 truncate">
                 {convData?.customer_id ? `#${convData.customer_id}` : 'belum terhubung'}
@@ -219,8 +313,61 @@ export default function ChatDetail() {
                 </button>
               )}
 
+              {/* Claim status pill — shown next to primary action */}
+              {claim.data?.claim ? (
+                claim.data.claim.staff_id === claim.data.me ? (
+                  <button
+                    onClick={doRelease}
+                    className="text-xs px-3 py-2 rounded-md text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 whitespace-nowrap"
+                    title="Lepas claim"
+                  >🔓 Anda yang handle</button>
+                ) : (
+                  <span
+                    className="text-xs px-3 py-2 rounded-md text-amber-700 border border-amber-200 bg-amber-50 whitespace-nowrap"
+                    title={`Diklaim ${new Date(claim.data.claim.claimed_at).toLocaleString('id-ID')}`}
+                  >🔒 {claim.data.claim.full_name || claim.data.claim.username}</span>
+                )
+              ) : (
+                <button
+                  onClick={doClaim}
+                  className="text-xs px-3 py-2 rounded-md text-slate-700 border border-slate-200 bg-white hover:bg-slate-50 whitespace-nowrap"
+                  title="Claim — lain operator nggak balas conv ini"
+                >🤝 Claim</button>
+              )}
+
               {/* Desktop: all secondary actions inline */}
               <div className="hidden sm:flex items-center gap-2">
+                {isSnoozed ? (
+                  <button
+                    onClick={doUnsnooze}
+                    className="text-xs px-3 py-2 rounded-md text-indigo-700 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 whitespace-nowrap"
+                    title="Buka snooze"
+                  >
+                    💤 Unsnooze
+                  </button>
+                ) : (
+                  <div className="relative">
+                    <button
+                      onClick={() => setSnoozeOpen((v) => !v)}
+                      className="text-xs px-3 py-2 rounded-md text-indigo-700 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 whitespace-nowrap"
+                      title="Snooze AI auto-reply"
+                    >
+                      💤 Snooze
+                    </button>
+                    {snoozeOpen && (
+                      <>
+                        <button type="button" aria-label="close" onClick={() => setSnoozeOpen(false)} className="fixed inset-0 z-40 bg-transparent" />
+                        <div className="absolute right-0 top-10 z-50 w-44 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                          {[1, 4, 24, 72].map((h) => (
+                            <button key={h} onClick={() => doSnooze(h)} className="block w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 border-b border-slate-100 last:border-0">
+                              {h < 24 ? `${h} jam` : `${h / 24} hari`}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 <button
                   onClick={summarizeChat}
                   disabled={summaryLoading}
@@ -263,6 +410,17 @@ export default function ChatDetail() {
                 )}
               </div>
 
+              {/* Mobile: customer panel toggle (always visible) */}
+              <button
+                type="button"
+                onClick={() => setPanelOpen(true)}
+                aria-label="Buka info customer"
+                className="lg:hidden w-10 h-10 inline-flex items-center justify-center rounded-md text-slate-600 border border-slate-200 bg-white hover:bg-slate-50"
+                title="Info customer"
+              >
+                <span aria-hidden>👤</span>
+              </button>
+
               {/* Mobile: overflow menu */}
               <div className="relative sm:hidden">
                 <button
@@ -287,6 +445,21 @@ export default function ChatDetail() {
                       role="menu"
                       className="absolute right-0 top-12 z-50 w-56 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden"
                     >
+                      {isSnoozed ? (
+                        <button
+                          role="menuitem"
+                          onClick={() => { setMoreOpen(false); doUnsnooze(); }}
+                          className="w-full text-left px-4 py-3 text-sm text-indigo-700 hover:bg-indigo-50"
+                        >💤 Unsnooze</button>
+                      ) : (
+                        [1, 4, 24].map((h) => (
+                          <button
+                            key={h} role="menuitem"
+                            onClick={() => { setMoreOpen(false); doSnooze(h); }}
+                            className="w-full text-left px-4 py-3 text-sm text-indigo-700 hover:bg-indigo-50 border-b border-slate-100"
+                          >💤 Snooze {h < 24 ? `${h}j` : `${h / 24}h`}</button>
+                        ))
+                      )}
                       <button
                         role="menuitem"
                         onClick={() => { setMoreOpen(false); summarizeChat(); }}
@@ -387,21 +560,69 @@ export default function ChatDetail() {
             onChange={handleFilePick}
           />
 
+          {/* Quick-reply chips — 1-tap insert top templates */}
+          {quickChips.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-2 overflow-x-auto">
+              {quickChips.map((t) => (
+                <button
+                  key={t.id} type="button"
+                  onClick={() => setDraft((d) => (d ? d + '\n' : '') + t.body)}
+                  className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 whitespace-nowrap"
+                  title={t.body}
+                >/{t.shortcut} · {t.title}</button>
+              ))}
+            </div>
+          )}
+
           {/* Mobile-first: stacked rows. sm+: textarea + vertical action stack on right */}
           <div className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  sendReply();
-                }
-              }}
-              placeholder="Ketik balasan operator…"
-              rows={2}
-              className="flex-1 resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500 min-h-[60px]"
-            />
+            <div className="flex-1 relative">
+              <textarea
+                value={draft}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDraft(v);
+                  // Open template picker on leading "/" with no spaces
+                  const m = v.match(/(^|\n)\/([a-z0-9_-]*)$/i);
+                  if (m) { setTplOpen(true); setTplFilter(m[2].toLowerCase()); }
+                  else setTplOpen(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    sendReply();
+                  }
+                  if (e.key === 'Escape') setTplOpen(false);
+                }}
+                placeholder="Ketik balasan operator… (ketik /shortcut untuk template)"
+                rows={2}
+                className="w-full resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500 min-h-[60px]"
+              />
+              {tplOpen && allTemplates.length > 0 && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-y-auto z-10">
+                  {allTemplates
+                    .filter((t) => !tplFilter || t.shortcut.includes(tplFilter) || t.title.toLowerCase().includes(tplFilter))
+                    .slice(0, 8)
+                    .map((t) => (
+                      <button
+                        key={t.id} type="button"
+                        onClick={() => {
+                          setDraft((d) => d.replace(/(^|\n)\/[a-z0-9_-]*$/i, (m) => m.startsWith('\n') ? '\n' + t.body : t.body));
+                          setTplOpen(false);
+                        }}
+                        className="block w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                      >
+                        <div className="flex items-center gap-2 text-xs">
+                          <code className="bg-slate-100 px-1.5 py-0.5 rounded">/{t.shortcut}</code>
+                          <span className="font-medium text-slate-700">{t.title}</span>
+                          {t.category && <span className="text-slate-400">· {t.category}</span>}
+                        </div>
+                        <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">{t.body}</div>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
 
             {/* Mobile: 3 icon-buttons in a row + send full width */}
             <div className="flex sm:hidden items-center gap-2">
@@ -422,6 +643,16 @@ export default function ChatDetail() {
                 className="w-11 h-11 inline-flex items-center justify-center rounded-md text-brand-700 border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-50"
               >
                 {suggesting ? <span className="text-xs">…</span> : <span aria-hidden>✨</span>}
+              </button>
+              <button
+                type="button"
+                onClick={() => rewriteDraft('sopan')}
+                disabled={rewriting || !draft.trim()}
+                aria-label="Perhalus draft dengan AI"
+                title="Perhalus draft dengan AI"
+                className="w-11 h-11 inline-flex items-center justify-center rounded-md text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 disabled:opacity-50"
+              >
+                {rewriting ? <span className="text-xs">…</span> : <span aria-hidden>✏️</span>}
               </button>
               <button
                 type="submit"
@@ -453,6 +684,23 @@ export default function ChatDetail() {
                 {suggesting ? '…' : '✨ AI Suggest'}
               </button>
               <button
+                type="button"
+                onClick={() => rewriteDraft('sopan')}
+                disabled={rewriting || !draft.trim()}
+                className="text-xs px-3 py-2 rounded-md text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 disabled:opacity-50 whitespace-nowrap"
+                title="Perhalus draft (tone sopan)"
+              >
+                {rewriting ? '…' : '✏️ Perhalus'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCatalogOpen(true)}
+                className="text-xs px-3 py-2 rounded-md text-pink-700 border border-pink-200 bg-pink-50 hover:bg-pink-100 whitespace-nowrap"
+                title="Pilih produk dari katalog & kirim ke chat"
+              >
+                🌷 Katalog
+              </button>
+              <button
                 type="submit"
                 disabled={sending || !draft.trim()}
                 className="bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-md hover:bg-brand-600 disabled:opacity-50"
@@ -474,11 +722,91 @@ export default function ChatDetail() {
         )}
         </div>
 
-        {/* Right sidebar: customer profile */}
+        {/* Right sidebar: customer profile (desktop) */}
         <div className="hidden lg:block">
           <CustomerPanel convId={id} />
         </div>
+
+        {/* Catalog picker modal */}
+        {catalogOpen && (
+          <CatalogPicker
+            query={catalogQuery}
+            setQuery={setCatalogQuery}
+            sending={catalogSending}
+            onSend={sendProduct}
+            onClose={() => setCatalogOpen(false)}
+          />
+        )}
+
+        {/* Mobile/tablet: slide-in drawer */}
+        {panelOpen && (
+          <div className="lg:hidden fixed inset-0 z-40" role="dialog" aria-modal="true">
+            <button
+              type="button"
+              aria-label="Tutup info customer"
+              onClick={() => setPanelOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <div className="absolute right-0 top-0 bottom-0 w-[88vw] max-w-sm bg-slate-50 shadow-xl flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-white">
+                <span className="font-semibold text-slate-800">Info customer</span>
+                <button
+                  onClick={() => setPanelOpen(false)}
+                  aria-label="Tutup"
+                  className="w-9 h-9 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
+                >✕</button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <CustomerPanel convId={id} />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
+  );
+}
+
+function CatalogPicker({ query, setQuery, onSend, sending, onClose }) {
+  const url = `/api/inbox/products/search?q=${encodeURIComponent(query)}`;
+  const products = useSWR(url, fetcher, { dedupingInterval: 1000 });
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+          <span className="font-semibold text-slate-800">Pilih produk dari katalog</span>
+          <button onClick={onClose} aria-label="Tutup" className="w-8 h-8 inline-flex items-center justify-center rounded text-slate-500 hover:bg-slate-100">✕</button>
+        </div>
+        <div className="px-4 py-3 border-b border-slate-100">
+          <input
+            value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari nama produk / kategori (mis. papan duka, bouquet mawar)…" autoFocus
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded focus:outline-none focus:border-brand-500"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto p-3">
+          {products.isLoading && <div className="text-center text-sm text-slate-400 py-6">Loading…</div>}
+          {products.data?.items?.length === 0 && <div className="text-center text-sm text-slate-400 py-6">Tidak ada hasil.</div>}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {(products.data?.items || []).map((p) => (
+              <button
+                key={p.id} type="button" onClick={() => onSend(p.id)} disabled={sending === p.id}
+                className="text-left rounded-md border border-slate-200 hover:border-brand-300 hover:shadow-sm overflow-hidden bg-white disabled:opacity-50"
+              >
+                {p.image_url
+                  ? <img src={p.image_url} alt="" className="w-full h-32 object-cover bg-slate-100" loading="lazy" />
+                  : <div className="w-full h-32 bg-slate-100 flex items-center justify-center text-slate-300 text-xs">no image</div>}
+                <div className="p-2">
+                  <div className="text-xs font-medium text-slate-800 line-clamp-2">{p.name}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">{p.category}</div>
+                  <div className="text-xs font-semibold text-brand-700 mt-1">Rp {Number(p.price).toLocaleString('id-ID')}</div>
+                  <div className="text-[10px] text-slate-400 mt-1">{sending === p.id ? 'Mengirim…' : 'Klik untuk kirim'}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
