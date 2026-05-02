@@ -159,3 +159,42 @@ describe('apply (DB writer)', () => {
     expect(c.rows[0].manual_stage_override).toBe(false);
   });
 });
+
+const { computeForecastFromRows } = require('../services/pipelineEngine');
+
+describe('computeForecastFromRows', () => {
+  test('sums value × probability for non-terminal with value', () => {
+    const rows = [
+      { pipeline_stage: 'tertarik', deal_value_idr: 500_000 },
+      { pipeline_stage: 'form_dikirim', deal_value_idr: 1_000_000 },
+      { pipeline_stage: 'order_submitted', deal_value_idr: 2_000_000 },
+      { pipeline_stage: 'paid', deal_value_idr: 750_000 },
+      { pipeline_stage: 'delivered', deal_value_idr: 800_000 },
+      { pipeline_stage: 'lost', deal_value_idr: 600_000 },
+      { pipeline_stage: 'baru', deal_value_idr: null },
+    ];
+    const r = computeForecastFromRows(rows);
+    // 75k + 350k + 1.4M + 0 (paid is realized) = 1,825,000
+    expect(r.expectedRevenue).toBe(1_825_000);
+    // realized = paid + delivered = 1,550,000
+    expect(r.realizedRevenue).toBe(1_550_000);
+    expect(r.dealCount).toBe(7);
+  });
+
+  test('byStage groups count + sum', () => {
+    const rows = [
+      { pipeline_stage: 'tertarik', deal_value_idr: 100_000 },
+      { pipeline_stage: 'tertarik', deal_value_idr: 200_000 },
+      { pipeline_stage: 'paid', deal_value_idr: 500_000 },
+    ];
+    const r = computeForecastFromRows(rows);
+    expect(r.byStage.tertarik).toEqual({ count: 2, value: 300_000 });
+    expect(r.byStage.paid).toEqual({ count: 1, value: 500_000 });
+  });
+
+  test('handles empty rows', () => {
+    const r = computeForecastFromRows([]);
+    expect(r.expectedRevenue).toBe(0);
+    expect(r.dealCount).toBe(0);
+  });
+});

@@ -193,6 +193,92 @@ async function fillFromOrder(client, convId, orderId, valueIdr) {
   );
 }
 
+// Pure: compute forecast totals from an array of conv rows.
+function computeForecastFromRows(rows) {
+  let expectedRevenue = 0;
+  let realizedRevenue = 0;
+  const byStage = {};
+  for (const r of rows) {
+    const stage = r.pipeline_stage;
+    const v = Number(r.deal_value_idr) || 0;
+    byStage[stage] ||= { count: 0, value: 0 };
+    byStage[stage].count += 1;
+    byStage[stage].value += v;
+
+    if (v <= 0) continue;
+    if (stage === 'delivered' || stage === 'paid') {
+      realizedRevenue += v;
+    } else if (!TERMINAL_STAGES.has(stage)) {
+      expectedRevenue += v * (STAGE_PROBABILITY[stage] || 0);
+    }
+  }
+  return {
+    expectedRevenue: Math.round(expectedRevenue),
+    realizedRevenue: Math.round(realizedRevenue),
+    dealCount: rows.length,
+    byStage,
+  };
+}
+
+// DB-backed: filter active deals & call pure forecast.
+async function computeForecast(filters = {}) {
+  const where = ['1=1'];
+  const params = [];
+  if (filters.type) { params.push(filters.type); where.push(`pipeline_type = $${params.length}`); }
+  if (filters.dateFrom) { params.push(filters.dateFrom); where.push(`pipeline_stage_at >= $${params.length}`); }
+  const sql = `SELECT pipeline_stage, deal_value_idr FROM crm_conversations WHERE ${where.join(' AND ')}`;
+  const { rows } = await pg.query(sql, params);
+  return computeForecastFromRows(rows);
+}
+
+// Conversion rate from event log: count of distinct convs that reached each stage.
+async function computeConversionRates(days = 30) {
+  const { rows } = await pg.query(
+    `SELECT to_stage, COUNT(DISTINCT conversation_id)::int AS n
+     FROM crm_pipeline_events
+     WHERE created_at > now() - ($1 || ' days')::interval
+     GROUP BY to_stage`,
+    [String(days)]
+  );
+  const counts = {};
+  for (const r of rows) counts[r.to_stage] = r.n;
+  const stageOrder = ['baru', 'tertarik', 'form_dikirim', 'order_submitted', 'paid', 'delivered'];
+  const rates = {};
+  for (let i = 1; i < stageOrder.length; i++) {
+    const from = stageOrder[i - 1];
+    const to = stageOrder[i];
+    const fromN = counts[from] || 0;
+    const toN = counts[to] || 0;
+    rates[`${from}→${to}`] = fromN ? +(toN / fromN).toFixed(3) : 0;
+  }
+  return { rates, counts };
+}
+
+// Avg seconds spent per stage (for non-terminal stages currently in pipeline).
+async function computeAvgTimePerStage() {
+  const { rows } = await pg.query(
+    `SELECT pipeline_stage,
+            AVG(EXTRACT(EPOCH FROM (now() - pipeline_stage_at)))::int AS avg_seconds
+     FROM crm_conversations
+     WHERE pipeline_stage NOT IN ('delivered','lost')
+     GROUP BY pipeline_stage`
+  );
+  const out = {};
+  for (const r of rows) out[r.pipeline_stage] = Number(r.avg_seconds) || 0;
+  return out;
+}
+
+async function topLostReasons(days = 30, limit = 5) {
+  const { rows } = await pg.query(
+    `SELECT lost_reason, COUNT(*)::int AS n FROM crm_conversations
+     WHERE pipeline_stage='lost' AND pipeline_stage_at > now() - ($1 || ' days')::interval
+       AND lost_reason IS NOT NULL
+     GROUP BY lost_reason ORDER BY n DESC LIMIT $2`,
+    [String(days), limit]
+  );
+  return rows;
+}
+
 module.exports = {
   computeNextStage,
   rawTransition,
@@ -200,6 +286,11 @@ module.exports = {
   setType,
   setDealValue,
   fillFromOrder,
+  computeForecastFromRows,
+  computeForecast,
+  computeConversionRates,
+  computeAvgTimePerStage,
+  topLostReasons,
   STAGE_PROBABILITY,
   TERMINAL_STAGES,
 };
