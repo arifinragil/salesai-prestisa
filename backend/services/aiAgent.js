@@ -228,12 +228,8 @@ async function processOne() {
     }
 
     // ── Anti-ban hygiene (humanize bot signature) ────────────────────────
-    // 1. Mark inbound message as read on WhatsApp (auto seen)
-    waClient.sendSeen({
-      phone: conv.phone,
-      messageId: msg.waha_message_id,
-      session: conv.wa_session,
-    }).catch(() => {});
+    // Note: sendSeen sekarang di-handle di webhook ingest (fire ASAP terlepas
+    // dari AI status / handover). Worker tidak perlu lagi.
 
     // 1a. Opt-out detection. Customer ketik STOP/BERHENTI dll → AI permanent off.
     // Compliance + reduce block-rate signal. Send 1 confirmation, no further AI.

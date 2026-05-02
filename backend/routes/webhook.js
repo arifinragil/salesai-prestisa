@@ -98,6 +98,18 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     );
     const msg = msgQ.rows[0];
 
+    // Mark message as read on WhatsApp (✓✓ blue) — fire ASAP, terlepas AI on/off
+    // atau handover state. Cegah customer pikir pesan tidak ke-deliver.
+    // Best-effort: log + swallow on failure (jangan block ingest).
+    try {
+      const waClient = require('../services/waClient');
+      waClient.sendSeen({
+        phone: conv.phone,
+        messageId: parsed.wahaMessageId,
+        session: conv.wa_session,
+      }).catch(() => {});
+    } catch {}
+
     // #9 Spam filter — block first-time abusers BEFORE queueing AI work
     let spamSkipped = false;
     try {
