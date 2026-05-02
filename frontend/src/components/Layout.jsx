@@ -10,6 +10,7 @@ const navItems = [
   { href: '/inbox',           label: 'Inbox',     short: 'Inbox' },
   { href: '/pipeline',        label: 'Pipeline',  short: 'Pipe' },
   { href: '/tasks',           label: 'Tasks',     short: 'Tasks' },
+  { href: '/supervisor',      label: 'Supervisor', short: 'Sup', adminOnly: true },
   { href: '/ai-monitor',      label: 'Monitor',   short: 'Monitor' },
   { href: '/ai-settings',     label: 'Persona',   short: 'Persona' },
   { href: '/knowledge',       label: 'Knowledge', short: 'KB' },
@@ -97,7 +98,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
             </Link>
             {/* Desktop nav */}
             <nav className="hidden md:flex gap-1 ml-4">
-              {navItems.map((item) => (
+              {navItems.filter((it) => !it.adminOnly || user?.role === 'admin').map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -176,7 +177,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
               </button>
             </div>
             <nav className="flex-1 px-2 py-3 overflow-y-auto">
-              {navItems.map((item) => (
+              {navItems.filter((it) => !it.adminOnly || user?.role === 'admin').map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
