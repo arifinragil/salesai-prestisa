@@ -25,6 +25,34 @@ router.get('/latest', async (req, res) => {
   res.json({ suggestion: r.rows[0] });
 });
 
+// POST generate a fresh suggestion for the latest inbound (on-demand, copilot mode).
+// Operator-triggered; no auto-generate to save tokens. Returns the new log.
+router.post('/generate', async (req, res) => {
+  const convId = parseInt(req.params.id);
+  if (!Number.isFinite(convId)) return res.status(400).json({ error: 'bad_conv_id' });
+
+  const msgQ = await pg.query(
+    `SELECT id, body FROM crm_messages
+     WHERE conversation_id = $1 AND direction = 'in'
+     ORDER BY id DESC LIMIT 1`,
+    [convId]
+  );
+  const msg = msgQ.rows[0];
+  if (!msg) return res.status(404).json({ error: 'no_inbound' });
+
+  const ic = await pg.query(`SELECT last_intent FROM crm_conversations WHERE id = $1`, [convId]);
+  const out = await suggestionEngine.generate({
+    conversationId: convId,
+    inboundMsgId: msg.id,
+    inboundBody: msg.body,
+    intent: ic.rows[0]?.last_intent || null,
+  });
+
+  const io = notify.getIO?.();
+  if (io) io.to(`crm:conv:${convId}`).emit('suggestion:new', { conversation_id: convId, ...out });
+  res.json(out);
+});
+
 // POST regenerate the latest suggestion (rate-limited)
 router.post('/regenerate', async (req, res) => {
   const convId = parseInt(req.params.id);

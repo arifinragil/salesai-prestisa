@@ -514,39 +514,16 @@ async function processOne() {
       return { ok: true, handover: true, handover_id: hoId, handover_reason: 'cost_cap_reached', conversation_id: conv.id };
     }
 
-    // Co-Pilot mode — generate suggestions for operator instead of auto-replying.
-    // Bypasses: opt-out, snooze, paused, dangerous-intent handover, cost cap all
-    // already applied above. From here we either generate suggestions (copilot)
-    // or proceed to Claude tool-call loop (auto).
+    // Co-Pilot mode — DO NOT auto-generate (saves tokens). Operator triggers
+    // generation via /api/inbox/conversations/:id/suggestions/generate when needed.
+    // We still update last_intent so the on-demand generate has good case-library
+    // ranking signals. No outbound AI message is sent.
     const aiMode = await settings.getSetting('ai_mode', 'auto');
     if (aiMode === 'copilot') {
-      try {
-        const result = await suggestionEngine.generate({
-          conversationId: conv.id,
-          inboundMsgId: msg.id,
-          inboundBody: inboundText,
-          intent: cls.intent || null,
-          intentConf: cls.confidence ?? null,
-        });
-        const io = require('./notify').getIO?.();
-        if (io) {
-          io.to(`crm:conv:${conv.id}`).emit('suggestion:new', {
-            conversation_id: conv.id,
-            log_id: result.log_id,
-            options: result.options,
-            generation_ms: result.generation_ms,
-            low_confidence_warning: result.low_confidence_warning,
-          });
-        }
-        await client.query(`UPDATE crm_conversations SET last_intent = $2 WHERE id = $1`, [conv.id, cls.intent]);
-        await markJob(client, job.id, 'done');
-        logger.info({ convId: conv.id, log_id: result.log_id, ms: result.generation_ms }, '[copilot] suggestions generated');
-        return { ok: true, copilot: true, log_id: result.log_id, conversation_id: conv.id };
-      } catch (err) {
-        logger.error({ err: err.message, stack: err.stack, convId: conv.id }, '[copilot] generate failed');
-        await markJob(client, job.id, 'failed', `copilot_generate: ${err.message}`);
-        return { ok: false, error: 'copilot_generate_failed', conversation_id: conv.id };
-      }
+      await client.query(`UPDATE crm_conversations SET last_intent = $2 WHERE id = $1`, [conv.id, cls.intent]);
+      await markJob(client, job.id, 'done');
+      logger.info({ convId: conv.id, intent: cls.intent }, '[copilot] inbound noted (suggestion deferred to manual trigger)');
+      return { ok: true, copilot: true, deferred: true, conversation_id: conv.id };
     }
     // ── auto mode continues below ───────────────────────────────────────────
 

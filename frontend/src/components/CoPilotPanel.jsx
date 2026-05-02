@@ -80,11 +80,39 @@ export default function CoPilotPanel({ conversationId, onUseSuggestion, leadTemp
     }
   };
 
+  async function handleGenerate() {
+    if (busy || !conversationId) return;
+    setBusy(true);
+    try {
+      await api(`/api/inbox/conversations/${conversationId}/suggestions/generate`, { method: 'POST' });
+      await mutate();
+    } catch (e) {
+      toast.error(e?.message || 'Gagal generate');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!conversationId) return null;
   if (isLoading) {
     return <div className="px-3 py-2 text-xs text-slate-400">Loading suggestion…</div>;
   }
-  if (!sug) return null;
+  if (!sug) {
+    // No suggestion yet for this conv — manual trigger to save tokens.
+    return (
+      <div className="border-t border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-between gap-3">
+        <span className="text-xs text-slate-500">🤖 Co-Pilot siap — klik untuk generate suggestion</span>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={busy}
+          className="text-xs px-3 py-1.5 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:bg-slate-300"
+        >
+          {busy ? 'Generating…' : '✨ Generate'}
+        </button>
+      </div>
+    );
+  }
 
   const lowConf = opts.some((o) => o.confidence === 'low');
 
