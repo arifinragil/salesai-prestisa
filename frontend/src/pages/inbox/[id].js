@@ -10,6 +10,7 @@ import { useSocket } from '@/lib/useSocket';
 import { useToast } from '@/components/Toast';
 import { convStatusLabel, formatRelative, formatPhone } from '@/lib/format';
 import PipelineStageBadge from '@/components/PipelineStageBadge';
+import CoPilotPanel from '@/components/CoPilotPanel';
 
 export default function ChatDetail() {
   const router = useRouter();
@@ -31,10 +32,14 @@ export default function ChatDetail() {
   const [tplOpen, setTplOpen] = useState(false);
   const [tplFilter, setTplFilter] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
+  const [pendingSuggestion, setPendingSuggestion] = useState(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const { data: tplData } = useSWR('/api/ops/reply-templates', fetcher);
   const { data: snipData } = useSWR('/api/users/me/snippets', fetcher);
+  const settingsData = useSWR('/api/admin/settings', fetcher, { revalidateOnFocus: false, refreshInterval: 60_000 });
+  const aiMode = (settingsData.data?.items || []).find((s) => s.key === 'ai_mode')?.value || 'auto';
   const allTemplates = [
     ...((snipData?.items || []).map((s) => ({ ...s, scope: 'me', category: 'pribadi' }))),
     ...(tplData?.items || []).map((t) => ({ ...t, scope: 'global' })),
@@ -91,10 +96,40 @@ export default function ChatDetail() {
     if (!body) return;
     setSending(true);
     try {
-      await api(`/api/inbox/conversations/${id}/send`, { method: 'POST', body: { body } });
-      // Log operator correction if AI suggestion was the seed
+      const result = await api(`/api/inbox/conversations/${id}/send`, { method: 'POST', body: { body } });
+      // Log AI correction (existing flow for /ai-suggest-reply)
       if (aiOriginal && aiOriginal !== body) {
-        api('/api/ops/ai-corrections', { method: 'POST', body: { conversation_id: id, ai_suggested: aiOriginal, operator_sent: body } }).catch(() => {});
+        api('/api/ops/ai-corrections', {
+          method: 'POST',
+          body: { conversation_id: id, ai_suggested: aiOriginal, operator_sent: body },
+        }).catch(() => {});
+      }
+      // Log copilot suggestion usage
+      if (pendingSuggestion) {
+        api(`/api/inbox/conversations/${id}/suggestions/${pendingSuggestion.logId}/use`, {
+          method: 'POST',
+          body: {
+            picked_rank: pendingSuggestion.rank,
+            sent_text: body,
+            sent_msg_id: result?.message_id || null,
+          },
+        }).catch(() => {});
+        setPendingSuggestion(null);
+      } else if (aiMode === 'copilot') {
+        // Manual reply (no Use clicked) — mark latest suggestion as 'manual'
+        try {
+          const latest = await fetcher(`/api/inbox/conversations/${id}/suggestions/latest`);
+          if (latest?.suggestion?.id && !latest.suggestion.usage_type) {
+            api(`/api/inbox/conversations/${id}/suggestions/${latest.suggestion.id}/use`, {
+              method: 'POST',
+              body: {
+                picked_rank: null,
+                sent_text: body,
+                sent_msg_id: result?.message_id || null,
+              },
+            }).catch(() => {});
+          }
+        } catch {}
       }
       setAiOriginal(null);
       setDraft('');
@@ -104,7 +139,7 @@ export default function ChatDetail() {
     } finally {
       setSending(false);
     }
-  }, [draft, id, messages, toast]);
+  }, [draft, id, messages, toast, aiOriginal, pendingSuggestion, aiMode]);
 
   const callAction = useCallback(async (path, label) => {
     try {
@@ -563,6 +598,17 @@ export default function ChatDetail() {
           {messages.data && <ChatThread messages={messages.data.messages || []} />}
         </div>
 
+        {aiMode === 'copilot' && (
+          <CoPilotPanel
+            conversationId={id}
+            onUseSuggestion={({ logId, rank, text }) => {
+              setDraft(text);
+              setPendingSuggestion({ logId, rank, originalText: text });
+              setTimeout(() => textareaRef.current?.focus(), 0);
+            }}
+          />
+        )}
+
         {/* Composer */}
         <form
           onSubmit={sendReply}
@@ -594,6 +640,7 @@ export default function ChatDetail() {
           <div className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3">
             <div className="flex-1 relative">
               <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(e) => {
                   const v = e.target.value;

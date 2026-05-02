@@ -10,6 +10,8 @@ const notify = require('./notify');
 const logger = require('./logger');
 const costGuard = require('./costGuard');
 const { resolveByPhone } = require('./contactResolver');
+const settings = require('./settings');
+const suggestionEngine = require('./suggestionEngine');
 
 const SAFE_HANDOVER_REPLY = 'Sebentar Kak, aku panggilkan tim ya. Tim Prestisa segera bantu jawab.';
 const HISTORY_LIMIT = 20;
@@ -511,6 +513,42 @@ async function processOne() {
       logger.warn({ current: cap.current, cap: cap.cap }, '[aiAgent] daily cost cap reached — handover');
       return { ok: true, handover: true, handover_id: hoId, handover_reason: 'cost_cap_reached', conversation_id: conv.id };
     }
+
+    // Co-Pilot mode — generate suggestions for operator instead of auto-replying.
+    // Bypasses: opt-out, snooze, paused, dangerous-intent handover, cost cap all
+    // already applied above. From here we either generate suggestions (copilot)
+    // or proceed to Claude tool-call loop (auto).
+    const aiMode = await settings.getSetting('ai_mode', 'auto');
+    if (aiMode === 'copilot') {
+      try {
+        const result = await suggestionEngine.generate({
+          conversationId: conv.id,
+          inboundMsgId: msg.id,
+          inboundBody: inboundText,
+          intent: cls.intent || null,
+          intentConf: cls.confidence ?? null,
+        });
+        const io = require('./notify').getIO?.();
+        if (io) {
+          io.to(`crm:conv:${conv.id}`).emit('suggestion:new', {
+            conversation_id: conv.id,
+            log_id: result.log_id,
+            options: result.options,
+            generation_ms: result.generation_ms,
+            low_confidence_warning: result.low_confidence_warning,
+          });
+        }
+        await client.query(`UPDATE crm_conversations SET last_intent = $2 WHERE id = $1`, [conv.id, cls.intent]);
+        await markJob(client, job.id, 'done');
+        logger.info({ convId: conv.id, log_id: result.log_id, ms: result.generation_ms }, '[copilot] suggestions generated');
+        return { ok: true, copilot: true, log_id: result.log_id, conversation_id: conv.id };
+      } catch (err) {
+        logger.error({ err: err.message, stack: err.stack, convId: conv.id }, '[copilot] generate failed');
+        await markJob(client, job.id, 'failed', `copilot_generate: ${err.message}`);
+        return { ok: false, error: 'copilot_generate_failed', conversation_id: conv.id };
+      }
+    }
+    // ── auto mode continues below ───────────────────────────────────────────
 
     const resolved = await resolveByPhone(conv.phone);
     const systemPrompt = await persona.buildSystemPrompt({

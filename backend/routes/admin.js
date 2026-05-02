@@ -29,6 +29,7 @@ const ALLOWED_SETTING_KEYS = new Set([
   'anomaly_alerts_enabled',
   'claim_lease_minutes',
   'spam_filter_enabled',
+  'ai_mode',                          // auto | copilot
 ]);
 
 router.get('/settings', async (_req, res) => {
@@ -166,6 +167,10 @@ router.put('/settings/:key', async (req, res) => {
       };
     }
     value = merged;
+  } else if (key === 'ai_mode') {
+    if (!['auto', 'copilot'].includes(value)) {
+      return res.status(400).json({ success: false, message: "ai_mode must be 'auto' or 'copilot'" });
+    }
   }
   await settingsSvc.setSetting(key, value, req.staff.staff_id);
   res.json({ success: true, key, masked: key === 'ai_credentials' ? true : false });

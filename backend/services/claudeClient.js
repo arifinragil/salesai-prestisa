@@ -107,4 +107,30 @@ async function generateWithTools({ systemPrompt, messages, tools, executor, maxI
   return { text: '', calls, usage: { input_tokens: usageIn, output_tokens: usageOut }, iterationsCapped: true };
 }
 
-module.exports = { generateWithTools, getClient };
+/**
+ * Simple one-shot completion with no tools. Thin wrapper for use cases like
+ * suggestion synthesis, summarisation, etc.
+ */
+async function complete({ model, system, messages, max_tokens = 1024, temperature = 0.7 }) {
+  const ant = getClient();
+  const sysBlock = system
+    ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    : undefined;
+  const resp = await withRetry(() => ant.messages.create({
+    model: model || MODEL(),
+    max_tokens,
+    temperature,
+    system: sysBlock,
+    messages,
+  }));
+  const text = (resp.content || [])
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('').trim();
+  return {
+    text,
+    usage: { input_tokens: resp.usage?.input_tokens || 0, output_tokens: resp.usage?.output_tokens || 0 },
+  };
+}
+
+module.exports = { generateWithTools, complete, getClient };
