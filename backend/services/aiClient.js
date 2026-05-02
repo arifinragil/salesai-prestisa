@@ -141,11 +141,81 @@ async function listGeminiModels(apiKey) {
   return { provider: 'gemini', models };
 }
 
+// Tool-less completion (no tool-loop). Used by suggestion engine + any other
+// path that just needs "input → text". Routes to active provider per setting.
+async function complete({ system, messages, max_tokens = 1024, temperature = 0.7 }) {
+  const provider = await getActiveProvider();
+  const providerConfig = await getProviderConfig(provider);
+  if (!providerConfig.apiKey) {
+    throw new Error(`API key untuk provider "${provider}" belum diset (cek /ai-settings)`);
+  }
+  if (provider === 'anthropic') {
+    const prevKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = providerConfig.apiKey;
+    try {
+      return await claude.complete({
+        model: providerConfig.model,
+        system, messages, max_tokens, temperature,
+      });
+    } finally {
+      if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prevKey;
+    }
+  }
+  if (provider === 'openai') {
+    return openaiComplete({ apiKey: providerConfig.apiKey, model: providerConfig.model, system, messages, max_tokens, temperature });
+  }
+  if (provider === 'gemini') {
+    return geminiComplete({ apiKey: providerConfig.apiKey, model: providerConfig.model, system, messages, max_tokens, temperature });
+  }
+  throw new Error(`provider tidak support complete: ${provider}`);
+}
+
+async function openaiComplete({ apiKey, model, system, messages, max_tokens, temperature }) {
+  const msgs = system ? [{ role: 'system', content: system }, ...messages] : messages;
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages: msgs, max_tokens, temperature }),
+  });
+  if (!r.ok) throw new Error(`openai ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const d = await r.json();
+  return {
+    text: d.choices?.[0]?.message?.content?.trim() || '',
+    usage: { input_tokens: d.usage?.prompt_tokens || 0, output_tokens: d.usage?.completion_tokens || 0 },
+  };
+}
+
+async function geminiComplete({ apiKey, model, system, messages, max_tokens, temperature }) {
+  const contents = messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
+  }));
+  const body = {
+    contents,
+    generationConfig: { maxOutputTokens: max_tokens, temperature },
+  };
+  if (system) body.systemInstruction = { parts: [{ text: system }] };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const d = await r.json();
+  const text = (d.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
+  return {
+    text,
+    usage: { input_tokens: d.usageMetadata?.promptTokenCount || 0, output_tokens: d.usageMetadata?.candidatesTokenCount || 0 },
+  };
+}
+
 module.exports = {
   VALID_PROVIDERS,
   getActiveProvider,
   getProviderConfig,
   getActiveStatus,
   generateWithTools,
+  complete,
   listProviderModels,
 };

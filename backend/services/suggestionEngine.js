@@ -1,15 +1,14 @@
 // backend/services/suggestionEngine.js
 // Generate 4 reply suggestions for an inbound message:
 //   - 3 from case library (relevance-ranked)
-//   - 1 AI synthesis via Claude haiku (alt phrasing / CTA)
+//   - 1 AI synthesis via active provider (anthropic / openai / gemini per setting)
 // Persist to crm_suggestion_log, return options + log id.
 const pg = require('../db/postgres');
 const caseLibrary = require('./caseLibrary');
-const claude = require('./claudeClient');
+const aiClient = require('./aiClient');
 const persona = require('./aiPersona');
 const logger = require('./logger');
 
-const AI_MODEL = process.env.COPILOT_AI_MODEL || 'claude-haiku-4-5';
 const AI_TIMEOUT_MS = parseInt(process.env.COPILOT_AI_TIMEOUT_MS) || 4000;
 
 async function lastTurns(conversationId, limit = 5) {
@@ -55,8 +54,7 @@ async function generateAi({ inboundBody, intent, intentConf, turns, caseOptions 
   const t0 = Date.now();
   try {
     const resp = await Promise.race([
-      claude.complete({
-        model: AI_MODEL,
+      aiClient.complete({
         system: sys,
         messages: [{ role: 'user', content: buildAiPrompt({ inboundBody, intent, intentConf, turns, caseOptions }) }],
         max_tokens: 400,
