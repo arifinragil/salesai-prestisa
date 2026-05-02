@@ -9,3 +9,7 @@ node_modules
 node_modules/
 out/
 uploads/
+
+# Screenshot tooling node_modules
+scripts/screenshots/node_modules
+scripts/screenshots/package-lock.json
