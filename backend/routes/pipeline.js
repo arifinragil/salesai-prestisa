@@ -154,4 +154,29 @@ router.get('/events', async (req, res) => {
   res.json({ success: true, items: rows });
 });
 
+// Bulk stage change
+router.post('/bulk-stage', async (req, res) => {
+  const ids = (req.body?.conv_ids || []).map((n) => parseInt(n)).filter(Boolean);
+  const { stage, lost_reason, lost_note } = req.body || {};
+  if (!ids.length || !STAGES.includes(stage)) {
+    return res.status(400).json({ success: false, message: `conv_ids + stage(${STAGES.join('|')}) required` });
+  }
+  if (stage === 'lost' && !LOST_REASONS.includes(lost_reason)) {
+    return res.status(400).json({ success: false, message: `lost_reason required: ${LOST_REASONS.join('|')}` });
+  }
+  let ok = 0, failed = 0;
+  const errors = [];
+  for (const id of ids) {
+    try {
+      await engine.apply(pg, id, { type: 'manual_set', targetStage: stage }, {
+        source: 'manual:operator_bulk', force: true, staffId: req.staff.staff_id,
+        lostReason: lost_reason, lostNote: lost_note,
+      });
+      if (notify.notifyConvUpdated) notify.notifyConvUpdated(id);
+      ok++;
+    } catch (err) { failed++; errors.push({ conv_id: id, message: err.message }); }
+  }
+  res.json({ success: true, ok, failed, errors });
+});
+
 module.exports = router;

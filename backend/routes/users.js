@@ -19,6 +19,40 @@ router.post('/me/heartbeat', async (req, res) => {
   res.json({ success: true });
 });
 
+// Active staff list — used by mention autocomplete (cached client-side).
+router.get('/active', async (_req, res) => {
+  const { rows } = await pg.query(
+    `SELECT id, username, full_name FROM staff_users
+     WHERE active = TRUE AND disabled_at IS NULL ORDER BY username LIMIT 100`
+  );
+  res.json({ success: true, items: rows });
+});
+
+// Update own telegram_chat_id (opt-in personal notifications).
+router.put('/me/telegram', async (req, res) => {
+  const chatId = (req.body?.telegram_chat_id || '').toString().trim() || null;
+  await pg.query(`UPDATE staff_users SET telegram_chat_id = $2 WHERE id = $1`, [req.staff.staff_id, chatId]);
+  res.json({ success: true });
+});
+
+// Test personal Telegram delivery.
+router.post('/me/telegram-test', async (req, res) => {
+  const tg = require('../services/telegramNotify');
+  const r = await tg.sendToStaff(req.staff.staff_id,
+    `✅ Halo ${req.staff.username}! Channel personal Tiara CRM aktif. Notifikasi task & mention akan masuk ke sini.`);
+  if (!r.ok) return res.status(400).json({ success: false, message: r.skipped || r.error || 'send failed' });
+  res.json({ success: true });
+});
+
+// Get own profile (for telegram_chat_id form).
+router.get('/me', async (req, res) => {
+  const { rows } = await pg.query(
+    `SELECT id, username, full_name, role, telegram_chat_id FROM staff_users WHERE id = $1`,
+    [req.staff.staff_id]
+  );
+  res.json({ success: true, user: rows[0] });
+});
+
 // Online roster — anyone logged in can see who else is online (last 90s).
 router.get('/online', async (_req, res) => {
   const { rows } = await pg.query(

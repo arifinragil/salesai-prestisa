@@ -29,7 +29,7 @@ async function send(text, opts = {}) {
   try {
     const token = await getToken();
     if (!token) return { ok: false, skipped: 'unconfigured' };
-    const chatId = await resolveChatId(opts.kind);
+    const chatId = opts._overrideChatId || (await resolveChatId(opts.kind));
     if (!chatId) return { ok: false, skipped: 'no chat for kind=' + (opts.kind || 'default') };
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
@@ -55,7 +55,7 @@ async function send(text, opts = {}) {
 
 // Verify by calling getMe — useful for settings page "Test" button.
 async function getMe() {
-  const { token } = await getConfig();
+  const token = await getToken();
   if (!token) return { ok: false, error: 'no token' };
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/getMe`);
@@ -65,4 +65,13 @@ async function getMe() {
   } catch (err) { return { ok: false, error: err.message }; }
 }
 
-module.exports = { send, getMe };
+// Send to specific staff via their personal telegram_chat_id (lookup from DB).
+async function sendToStaff(staffId, text, opts = {}) {
+  const pg = require('../db/postgres');
+  const r = await pg.query(`SELECT telegram_chat_id FROM staff_users WHERE id = $1`, [staffId]);
+  const chatId = r.rows[0]?.telegram_chat_id;
+  if (!chatId) return { ok: false, skipped: 'no_personal_chat_id' };
+  return send(text, { ...opts, _overrideChatId: chatId });
+}
+
+module.exports = { send, getMe, sendToStaff };
