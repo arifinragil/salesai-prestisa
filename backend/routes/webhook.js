@@ -98,6 +98,13 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
     );
     const msg = msgQ.rows[0];
 
+    // Set first_inbound_at on the first inbound message for this conv (idempotent).
+    await client.query(
+      `UPDATE crm_conversations SET first_inbound_at = COALESCE(first_inbound_at, $2)
+       WHERE id = $1`,
+      [conv.id, msg.created_at]
+    );
+
     // Mark message as read on WhatsApp (✓✓ blue) — fire ASAP, terlepas AI on/off
     // atau handover state. Cegah customer pikir pesan tidak ke-deliver.
     // Best-effort: log + swallow on failure (jangan block ingest).
