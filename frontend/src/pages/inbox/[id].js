@@ -34,6 +34,7 @@ export default function ChatDetail() {
   const [tplFilter, setTplFilter] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
   const [pendingSuggestion, setPendingSuggestion] = useState(null);
+  const [chipsOpen, setChipsOpen] = useState(false);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -627,17 +628,29 @@ export default function ChatDetail() {
             onChange={handleFilePick}
           />
 
-          {/* Quick-reply chips — 1-tap insert top templates */}
+          {/* Quick-reply chips — collapsible (default closed; expand for 1-tap insert).
+              Hint: ketik /shortcut di textarea juga buka template picker. */}
           {quickChips.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2 overflow-x-auto">
-              {quickChips.map((t) => (
-                <button
-                  key={t.id} type="button"
-                  onClick={() => setDraft((d) => (d ? d + '\n' : '') + t.body)}
-                  className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 whitespace-nowrap"
-                  title={t.body}
-                >/{t.shortcut} · {t.title}</button>
-              ))}
+            <div className="mb-2">
+              <button
+                type="button"
+                onClick={() => setChipsOpen((v) => !v)}
+                className="text-[11px] text-slate-500 hover:text-slate-700 inline-flex items-center gap-1"
+              >
+                {chipsOpen ? '▾' : '▸'} Templates ({quickChips.length})
+              </button>
+              {chipsOpen && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {quickChips.map((t) => (
+                    <button
+                      key={t.id} type="button"
+                      onClick={() => setDraft((d) => (d ? d + '\n' : '') + t.body)}
+                      className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 whitespace-nowrap"
+                      title={t.body}
+                    >/{t.shortcut} · {t.title}</button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
