@@ -9,22 +9,25 @@ router.use(requireStaff);
 
 router.get('/tags', async (_req, res) => {
   const { rows } = await pg.query(
-    `SELECT t.id, t.name, t.color, t.description,
+    `SELECT t.id, t.name, t.color, t.description, t.maps_to_pipeline_type,
             (SELECT COUNT(*) FROM crm_conversation_tags WHERE tag_id = t.id) AS conv_count
      FROM crm_tags t ORDER BY t.name`
   );
   res.json({ success: true, items: rows });
 });
 
+const VALID_PIPELINE_TYPES = new Set(['papan', 'bouquet', 'parsel', 'cake', 'wedding', 'b2b', 'unknown']);
+
 router.post('/tags', async (req, res) => {
-  const { name, color, description } = req.body || {};
+  const { name, color, description, maps_to_pipeline_type } = req.body || {};
   if (!name || !/^[a-zA-Z0-9 _-]{2,48}$/.test(name)) {
     return res.status(400).json({ success: false, message: 'name 2-48 chars (letters/digits/space/_/-)' });
   }
+  const mapType = maps_to_pipeline_type && VALID_PIPELINE_TYPES.has(maps_to_pipeline_type) ? maps_to_pipeline_type : null;
   try {
     const r = await pg.query(
-      `INSERT INTO crm_tags (name, color, description) VALUES ($1, $2, $3) RETURNING id`,
-      [name, color || 'slate', description || null]
+      `INSERT INTO crm_tags (name, color, description, maps_to_pipeline_type) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [name, color || 'slate', description || null, mapType]
     );
     res.json({ success: true, id: r.rows[0].id });
   } catch (err) {
@@ -35,13 +38,20 @@ router.post('/tags', async (req, res) => {
 
 router.put('/tags/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, color, description } = req.body || {};
+  const { name, color, description, maps_to_pipeline_type } = req.body || {};
+  let mapType = maps_to_pipeline_type;
+  if (mapType === '') mapType = null; // explicit clear
+  if (mapType && mapType !== null && !VALID_PIPELINE_TYPES.has(mapType)) {
+    return res.status(400).json({ success: false, message: `maps_to_pipeline_type must be one of: ${[...VALID_PIPELINE_TYPES].join('|')}` });
+  }
   await pg.query(
     `UPDATE crm_tags SET
-       name = COALESCE($2, name), color = COALESCE($3, color),
-       description = COALESCE($4, description)
+       name = COALESCE($2, name),
+       color = COALESCE($3, color),
+       description = COALESCE($4, description),
+       maps_to_pipeline_type = $5
      WHERE id = $1`,
-    [id, name || null, color || null, description ?? null]
+    [id, name || null, color || null, description ?? null, mapType ?? null]
   );
   res.json({ success: true });
 });

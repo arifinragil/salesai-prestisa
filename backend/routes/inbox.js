@@ -39,6 +39,10 @@ router.get('/conversations', async (req, res) => {
     params.push(tagId);
     where.push(`EXISTS (SELECT 1 FROM crm_conversation_tags ct WHERE ct.conversation_id = conv.id AND ct.tag_id = $${params.length})`);
   }
+  if (req.query.pipeline_stage) {
+    params.push(req.query.pipeline_stage);
+    where.push(`conv.pipeline_stage = $${params.length}`);
+  }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
     WITH last_msg AS (
@@ -62,6 +66,7 @@ router.get('/conversations', async (req, res) => {
            conv.ai_paused_until, conv.assigned_staff_id, conv.last_message_at,
            conv.last_intent, conv.handover_count, conv.shadow_mode, conv.wa_session,
            conv.experiment_variant,
+           conv.pipeline_stage, conv.pipeline_type, conv.manual_stage_override,
            lm.body AS last_body, lm.sender_type AS last_sender, lm.created_at AS last_at,
            COALESCE(ho.n, 0) AS open_handovers,
            COALESCE(ct.tags, '[]'::json) AS tags
@@ -420,7 +425,9 @@ router.get('/conversations/:id/customer', async (req, res) => {
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
   const { rows } = await pg.query(
     `SELECT id, phone, real_phone, push_name, customer_id, last_message_at, last_intent,
-            handover_count, status, shadow_mode, wa_session
+            handover_count, status, shadow_mode, wa_session,
+            pipeline_stage, pipeline_type, deal_value_idr, deal_value_locked,
+            manual_stage_override, lost_reason
      FROM crm_conversations WHERE id = $1`, [id]
   );
   const conv = rows[0];

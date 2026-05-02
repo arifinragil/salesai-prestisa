@@ -9,6 +9,7 @@ import { api, fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
 import { useToast } from '@/components/Toast';
 import { convStatusLabel, formatRelative, formatPhone } from '@/lib/format';
+import PipelineStageBadge from '@/components/PipelineStageBadge';
 
 export default function ChatDetail() {
   const router = useRouter();
@@ -287,6 +288,21 @@ export default function ChatDetail() {
                     💤 snooze s/d {new Date(convData.snoozed_until).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
                   </span>
                 )}
+                {convData?.pipeline_stage && (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/pipeline?focus=${id}`)}
+                    title={`Stage: ${convData.pipeline_stage}${convData.manual_stage_override ? ' (manual override)' : ''}`}
+                    className="hover:opacity-80"
+                  >
+                    <PipelineStageBadge
+                      stage={convData.pipeline_stage}
+                      override={convData.manual_stage_override}
+                      size="xs"
+                    />
+                  </button>
+                )}
+                <RevertStageButton convId={id} onRevert={() => conv.mutate()} />
               </div>
               <div className="text-[11px] text-slate-400 mt-0.5 truncate">
                 {convData?.customer_id ? `#${convData.customer_id}` : 'belum terhubung'}
@@ -808,5 +824,24 @@ function CatalogPicker({ query, setQuery, onSend, sending, onClose }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function RevertStageButton({ convId, onRevert }) {
+  const events = useSWR(convId ? `/api/pipeline/events?conversation_id=${convId}&limit=5` : null, fetcher);
+  const items = events.data?.items || [];
+  if (items.length < 2) return null;
+  async function doRevert() {
+    if (!confirm('Revert ke stage sebelumnya?')) return;
+    try {
+      await api(`/api/pipeline/conversations/${convId}/revert-stage`, { method: 'POST' });
+      onRevert();
+      events.mutate();
+    } catch (e) { alert(e.message); }
+  }
+  return (
+    <button onClick={doRevert}
+      className="text-[10px] px-1.5 py-0.5 rounded text-slate-500 hover:bg-slate-100"
+      title="Revert ke stage sebelumnya">↺</button>
   );
 }

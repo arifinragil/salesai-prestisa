@@ -7,6 +7,7 @@ import { fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
 import { useNotifPermission, useNotificationSound, showBrowserNotification } from '@/lib/useNotifications';
 import { formatRelative, truncate, convStatusLabel, formatPhone } from '@/lib/format';
+import PipelineStageBadge from '@/components/PipelineStageBadge';
 
 const TAG_COLOR = {
   slate:'bg-slate-100 text-slate-700 border-slate-200',
@@ -33,6 +34,7 @@ export default function InboxList() {
   const [search, setSearch] = useState('');
   const [queue, setQueue] = useState('');
   const [tagId, setTagId] = useState('');
+  const [stageFilter, setStageFilter] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const playSound = useNotificationSound();
@@ -45,6 +47,7 @@ export default function InboxList() {
   if (search) params.set('search', search);
   if (queue) params.set('queue', queue);
   if (tagId) params.set('tag_id', tagId);
+  if (stageFilter) params.set('pipeline_stage', stageFilter);
   const url = `/api/inbox/conversations${params.toString() ? '?' + params.toString() : ''}`;
   const sessions = useSWR('/api/inbox/wa-sessions', fetcher, { refreshInterval: 60_000 });
   const tags = useSWR('/api/ops/tags', fetcher, { refreshInterval: 120_000 });
@@ -197,6 +200,21 @@ export default function InboxList() {
               ))}
             </select>
           )}
+          <select
+            value={stageFilter}
+            onChange={(e) => setStageFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-slate-200 rounded-md bg-white"
+            title="Filter pipeline stage"
+          >
+            <option value="">Semua stage</option>
+            <option value="baru">Baru</option>
+            <option value="tertarik">Tertarik</option>
+            <option value="form_dikirim">Form Dikirim</option>
+            <option value="order_submitted">Submitted</option>
+            <option value="paid">Paid</option>
+            <option value="delivered">Delivered</option>
+            <option value="lost">Lost</option>
+          </select>
         </div>
 
         {selected.size > 0 && (
@@ -291,20 +309,25 @@ export default function InboxList() {
                           {conv.last_sender === 'customer' ? '' : '↗ '}
                           {truncate(conv.last_body || '(no message)', 90)}
                         </div>
-                        {Array.isArray(conv.tags) && conv.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {conv.tags.map((t) => (
-                              <span
-                                key={t.id}
-                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] border ${TAG_COLOR[t.color] || TAG_COLOR.slate}`}
-                                title={t.auto ? 'Auto-tagged oleh AI (intent classifier)' : undefined}
-                              >
-                                {t.auto && <span aria-hidden className="opacity-70">✨</span>}
-                                {t.name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {conv.pipeline_stage && (
+                            <PipelineStageBadge
+                              stage={conv.pipeline_stage}
+                              override={conv.manual_stage_override}
+                              size="xs"
+                            />
+                          )}
+                          {Array.isArray(conv.tags) && conv.tags.map((t) => (
+                            <span
+                              key={t.id}
+                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] border ${TAG_COLOR[t.color] || TAG_COLOR.slate}`}
+                              title={t.auto ? 'Auto-tagged oleh AI (intent classifier)' : undefined}
+                            >
+                              {t.auto && <span aria-hidden className="opacity-70">✨</span>}
+                              {t.name}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                       <div className="text-xs text-slate-400 whitespace-nowrap">
                         {formatRelative(conv.last_at || conv.last_message_at)}
