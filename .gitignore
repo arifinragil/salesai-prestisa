@@ -5,6 +5,7 @@
 .worktrees/
 coverage/
 dist/
+node_modules
 node_modules/
 out/
 uploads/
