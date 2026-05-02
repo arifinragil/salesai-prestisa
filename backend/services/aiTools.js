@@ -203,34 +203,52 @@ const declarations = [
 // ── Executors ────────────────────────────────────────────────────────────────
 
 // Normalisasi vocabulary Indonesian ↔ English untuk match category DB.
-// Customer pakai bahasa sehari-hari, DB pakai term taxonomy aslinya.
 const CATEGORY_SYNONYMS = {
-  'sukacita': 'congratulations',
-  'suka cita': 'congratulations',
-  'selamat': 'congratulations',
-  'duka': 'dukacita',
-  'duka cita': 'dukacita',
-  'belasungkawa': 'dukacita',
-  'pernikahan': 'wedding',
-  'nikah': 'wedding',
-  'menikah': 'wedding',
-  'kue': 'cake',
-  'tart': 'cake',
-  'mawar': 'rose',
-  'rangkaian': 'bouquet',
-  'buket': 'bouquet',
-  'hampers': 'parsel',
-  'paket': 'parsel',
+  'sukacita': 'congratulations', 'suka cita': 'congratulations', 'selamat': 'congratulations',
+  'duka': 'dukacita', 'duka cita': 'dukacita', 'belasungkawa': 'dukacita',
+  'pernikahan': 'wedding', 'nikah': 'wedding', 'menikah': 'wedding',
+  'kue': 'cake', 'tart': 'cake', 'mawar': 'rose',
+  'rangkaian': 'bouquet', 'buket': 'bouquet',
+  'hampers': 'parsel', 'paket': 'parsel',
 };
 
 function normalizeCategoryTokens(category) {
   let s = String(category || '').toLowerCase().trim();
-  // longest-first replacement
   const keys = Object.keys(CATEGORY_SYNONYMS).sort((a, b) => b.length - a.length);
-  for (const k of keys) {
-    if (s.includes(k)) s = s.replace(new RegExp(k, 'g'), CATEGORY_SYNONYMS[k]);
-  }
+  for (const k of keys) if (s.includes(k)) s = s.replace(new RegExp(k, 'g'), CATEGORY_SYNONYMS[k]);
   return s.split(/\s+/).filter(Boolean);
+}
+
+// Product code prefix mapping — paling reliable filter kalau intent jelas.
+// Format: digit 1-2 = jenis, digit 3-4 = sub-kategori.
+// Returns array of code prefixes yang harus match (OR-joined dengan category text match).
+function inferCodePrefixes(category, productType) {
+  const s = String(category || '').toLowerCase();
+  const t = String(productType || '').toLowerCase();
+  const prefixes = [];
+
+  // Jenis (2 digit pertama)
+  let jenisCode = null;
+  if (t === 'papan' || /papan/.test(s)) jenisCode = 'BP';
+  else if (t === 'bouquet' || /bouquet|buket|rangkaian/.test(s)) jenisCode = 'BQ';
+  else if (/bunga meja|standing/.test(s)) jenisCode = 'BM';
+  else if (t === 'cake' || /kue|cake|tart/.test(s)) jenisCode = 'CK';
+  else if (t === 'parsel' || /parsel|hampers|paket/.test(s)) jenisCode = 'P';
+
+  // Sub-kategori (digit 3-4)
+  let subCode = null;
+  if (/duka|belasungkawa|kondolensi/.test(s)) subCode = 'DC';
+  else if (/sukacita|suka cita|selamat|congratulations|congrat/.test(s)) subCode = 'C-';
+  else if (/wedding|pernikahan|nikah/.test(s)) subCode = 'W-';
+  else if (/kertas/.test(s)) subCode = 'KS';
+  else if (/kayu/.test(s)) subCode = 'KY';
+
+  if (jenisCode && subCode) {
+    prefixes.push(jenisCode + subCode);
+  } else if (jenisCode) {
+    prefixes.push(jenisCode);
+  }
+  return prefixes;
 }
 
 async function search_products({ args }) {
@@ -240,12 +258,26 @@ async function search_products({ args }) {
     const where = ['p.deleted_at IS NULL', 'p.price > 0'];
     const params = [];
     if (args.category) {
-      // category bisa multi-token (mis. "papan duka cita") — split + AND-LIKE
-      // Plus normalisasi: "papan sukacita" → ["papan", "congratulations"]
+      // Strategi 1: product_code prefix (paling reliable jika intent jelas)
+      const prefixes = inferCodePrefixes(args.category, args.product_type);
+      // Strategi 2: text match category/name dengan synonym normalization
       const tokens = normalizeCategoryTokens(args.category);
+      const textConds = [];
       for (const tok of tokens) {
+        textConds.push(`(LOWER(c.name) LIKE ? OR LOWER(p.name) LIKE ?)`);
         params.push(`%${tok}%`, `%${tok}%`);
-        where.push(`(LOWER(c.name) LIKE ? OR LOWER(p.name) LIKE ?)`);
+      }
+      if (prefixes.length) {
+        const codeConds = prefixes.map(() => `p.product_code LIKE ?`);
+        prefixes.forEach((pre) => params.push(`${pre}%`));
+        // OR antara: (text match all tokens) atau (code prefix match)
+        if (textConds.length) {
+          where.push(`((${textConds.join(' AND ')}) OR (${codeConds.join(' OR ')}))`);
+        } else {
+          where.push(`(${codeConds.join(' OR ')})`);
+        }
+      } else if (textConds.length) {
+        where.push(...textConds);
       }
     }
     if (useCity && args.city) {
@@ -259,7 +291,7 @@ async function search_products({ args }) {
       for (const tok of tokens) { params.push(`%${tok}%`); where.push(`LOWER(p.name) LIKE ?`); }
     }
     const sql = `
-      SELECT p.id, p.name, COALESCE(c.name, '?') AS category,
+      SELECT p.id, p.product_code, p.name, COALESCE(c.name, '?') AS category,
              p.price, p.image AS image_url, p.description,
              g_city.name AS city,
              COALESCE(s.total_penjualan, 0) AS total_penjualan
