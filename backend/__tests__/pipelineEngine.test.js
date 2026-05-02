@@ -1,4 +1,5 @@
-const { computeNextStage } = require('../services/pipelineEngine');
+const { computeNextStage, apply } = require('../services/pipelineEngine');
+const pg = require('../db/postgres');
 
 describe('computeNextStage', () => {
   test('baru + intent_qualified → tertarik', () => {
@@ -78,5 +79,83 @@ describe('computeNextStage', () => {
 
   test('unknown event → null', () => {
     expect(computeNextStage('baru', { type: 'unknown_xyz' }, false)).toBeNull();
+  });
+});
+
+describe('apply (DB writer)', () => {
+  let convId;
+
+  beforeAll(async () => {
+    const r = await pg.query(
+      `INSERT INTO crm_conversations (phone, status) VALUES ('628999000001', 'open') RETURNING id`
+    );
+    convId = r.rows[0].id;
+  });
+
+  afterAll(async () => {
+    await pg.query(`DELETE FROM crm_pipeline_events WHERE conversation_id = $1`, [convId]);
+    await pg.query(`DELETE FROM crm_conversations WHERE id = $1`, [convId]);
+    await pg.end();
+  });
+
+  test('apply intent_qualified on baru → tertarik', async () => {
+    await pg.query(
+      `UPDATE crm_conversations SET pipeline_stage='baru', manual_stage_override=FALSE,
+       pipeline_stage_history='[]'::jsonb WHERE id=$1`,
+      [convId]
+    );
+    const r = await apply(pg, convId, { type: 'intent_qualified' }, { source: 'auto:test' });
+    expect(r.applied).toBe(true);
+    expect(r.fromStage).toBe('baru');
+    expect(r.toStage).toBe('tertarik');
+
+    const c = await pg.query(
+      `SELECT pipeline_stage, manual_stage_override, pipeline_stage_history FROM crm_conversations WHERE id=$1`,
+      [convId]
+    );
+    expect(c.rows[0].pipeline_stage).toBe('tertarik');
+    expect(c.rows[0].manual_stage_override).toBe(false);
+    expect(c.rows[0].pipeline_stage_history).toHaveLength(1);
+    expect(c.rows[0].pipeline_stage_history[0].source).toBe('auto:test');
+  });
+
+  test('apply same event twice is no-op', async () => {
+    const before = await pg.query(
+      `SELECT COUNT(*)::int AS n FROM crm_pipeline_events WHERE conversation_id=$1`, [convId]
+    );
+    const r = await apply(pg, convId, { type: 'intent_qualified' }, { source: 'auto:test' });
+    expect(r.applied).toBe(false);
+    const after = await pg.query(
+      `SELECT COUNT(*)::int AS n FROM crm_pipeline_events WHERE conversation_id=$1`, [convId]
+    );
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
+  test('apply with force=true sets override and forces transition', async () => {
+    const r = await apply(pg, convId,
+      { type: 'manual_set', targetStage: 'paid' },
+      { source: 'manual:operator', force: true }
+    );
+    expect(r.applied).toBe(true);
+    expect(r.toStage).toBe('paid');
+    const c = await pg.query(
+      `SELECT pipeline_stage, manual_stage_override FROM crm_conversations WHERE id=$1`, [convId]
+    );
+    expect(c.rows[0].pipeline_stage).toBe('paid');
+    expect(c.rows[0].manual_stage_override).toBe(true);
+  });
+
+  test('manual override blocks backward but allows forward + clears flag', async () => {
+    // Currently paid + override true. order_submitted = backward → no-op.
+    const r1 = await apply(pg, convId, { type: 'order_submitted' }, { source: 'auto:funnel' });
+    expect(r1.applied).toBe(false);
+    // order_delivered from paid → forward → allowed, clears override.
+    const r2 = await apply(pg, convId, { type: 'order_delivered' }, { source: 'auto:cron' });
+    expect(r2.applied).toBe(true);
+    expect(r2.toStage).toBe('delivered');
+    const c = await pg.query(
+      `SELECT manual_stage_override FROM crm_conversations WHERE id=$1`, [convId]
+    );
+    expect(c.rows[0].manual_stage_override).toBe(false);
   });
 });
