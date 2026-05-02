@@ -43,10 +43,18 @@ async function run() {
       lastHourSql: `SELECT COUNT(*)::int AS n FROM crm_messages WHERE direction='out' AND send_status='send_failed' AND created_at > now() - interval '1 hour'`,
       baselineSql: `SELECT COUNT(*)::int AS n FROM crm_messages WHERE direction='out' AND send_status='send_failed' AND created_at BETWEEN now() - interval '25 hours' AND now() - interval '1 hour'`,
     },
+    {
+      kind: 'pipeline_stale_form_dikirim', label: 'Deal stuck di Form Dikirim',
+      lastHourSql: `SELECT COUNT(*)::int AS n FROM crm_conversations WHERE pipeline_stage='form_dikirim' AND pipeline_stage_at < now() - interval '24 hours'`,
+      baselineSql: `SELECT 0::int AS n`,
+      absoluteThreshold: 10,
+    },
   ];
 
   for (const c of checks) {
     const r = await checkKind(c);
+    // Absolute-threshold mode (overrides spike-based)
+    if (c.absoluteThreshold != null) r.isSpike = r.lastN > c.absoluteThreshold;
     if (!r.isSpike) continue;
 
     // Dedup: skip if same kind already alerted in last 60 min
