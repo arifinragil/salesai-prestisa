@@ -26,6 +26,7 @@ const SHOTS = [
   ['/promos', '08-promos.png', {}],
   ['/snippets', '09-snippets.png', {}],
   ['/users', '10-users.png', {}],
+  ['/tasks', '12-tasks.png', {}],
 ];
 
 async function main() {

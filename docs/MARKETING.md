@@ -155,6 +155,18 @@ Promo aktif di-update via UI. AI cek setiap reply — kalau ada promo relevan, A
 - Reset password
 - **Presence**: dot hijau saat operator online (heartbeat tiap 45s)
 - Last login tracking
+- Profil pribadi: opt-in **Telegram chat ID** untuk terima notif task & mention langsung di HP
+
+### 4.10 Tasks, Notifications, Internal Comments (Operator Productivity v2)
+
+![Tasks](assets/screenshots/12-tasks.png)
+
+Toolkit kolaborasi tim untuk handle volume chat tinggi tanpa kehilangan follow-up commitment:
+
+- **Tasks** — to-do per operator dengan due datetime + 4-state workflow (open/in_progress/done/cancelled). Bisa per-conv (terkait chat tertentu) atau standalone (operasional umum). Auto-reminder 1 jam sebelum due via in-app + Telegram personal.
+- **Notifications bell** — badge unread di top bar, dropdown 10 notif terakhir (task assigned/due/overdue + mention). Mark read inline.
+- **Internal comments + @mention** — thread privat per chat untuk koordinasi tim. Live autocomplete `@username` (Slack-style), notif otomatis ke yang di-mention. **Tidak pernah masuk WhatsApp** — operator only.
+- **Telegram personal binding** — operator paste chat ID di profil → semua notif (task & mention) auto-DM ke HP. Cocok kalau operator nggak selalu buka CRM.
 
 ---
 
@@ -220,7 +232,7 @@ ROI break-even <30 hari (asumsi setup cost ~Rp 30-40jt one-time + Rp 14jt/bulan 
 
 ## 7. Roadmap
 
-### Sudah live (v1)
+### Sudah live (v1 + v2)
 - ✅ Inbox + chat detail dengan AI suggest, perhalus, katalog picker
 - ✅ Sales pipeline kanban + forecast
 - ✅ AI Monitor dashboard lengkap
@@ -228,25 +240,23 @@ ROI break-even <30 hari (asumsi setup cost ~Rp 30-40jt one-time + Rp 14jt/bulan 
 - ✅ Reply templates + operator snippets
 - ✅ Tags dengan auto-tagging
 - ✅ Multi-LLM provider switch
-- ✅ Telegram multi-channel alerts
+- ✅ Telegram multi-channel alerts (SLA / Anomaly / Daily brief)
 - ✅ Customer health score (VIP/Warm/Cold/At-Risk)
 - ✅ Customer facts auto-extracted
 - ✅ Delivery comms (paid_confirm, H-1, H+1 CSAT)
 - ✅ Anomaly detection + daily brief
 - ✅ Operator presence + claim/lease
 - ✅ Anti-ban hygiene + spam filter
+- ✅ **Tasks & reminders** (hybrid conv-scoped/standalone, due datetime, snooze)
+- ✅ **Notifications bell** dengan unread badge + auto-mark on click
+- ✅ **Internal comments + @mention** dengan live autocomplete
+- ✅ **Telegram personal binding** untuk notif task & mention langsung di HP
 
-### v2 (queued — Sub-project 2 Operator Productivity)
-- ⏳ Tasks & reminders (per-conv atau standalone, dengan due datetime + Telegram personal)
-- ⏳ Internal comments + @mention (kolaborasi tim per conv)
-- ⏳ Bulk actions diperkaya (assign, snooze, stage, tag remove, close)
-- ⏳ Saved views (filter kombinasi disimpan untuk reuse harian)
-
-### v3 (Sub-project 3 Retention)
-- 🔮 Customer segmentation builder
-- 🔮 Lifecycle workflow engine (drip campaigns, win-back, birthday)
-- 🔮 Loyalty points / voucher system
-- 🔮 Recurring subscription delivery
+### v3 (in design — Sub-project 3 Retention)
+- ⏳ Customer segmentation builder (filter customer by attribute kombinasi)
+- ⏳ Lifecycle workflow engine (trigger event/time → conditions → actions)
+- ⏳ Pre-built journey templates (birthday, anniversary, win-back churned, post-purchase)
+- 🔮 Loyalty points / voucher system (defer — butuh integrasi order form Prestisa)
 
 ### Long-term
 - 🌐 Meta Cloud API migration path (template-based broadcast)
@@ -264,4 +274,4 @@ ROI break-even <30 hari (asumsi setup cost ~Rp 30-40jt one-time + Rp 14jt/bulan 
 
 *Tiara CRM dibangun untuk Prestisa, dapat di-customize untuk toko bunga / florist lain dengan workflow serupa. Source code & deployment guide tersedia.*
 
-**Versi marketing deck**: 1.0 (2026-05-02).
+**Versi marketing deck**: 1.1 (2026-05-02). Update: include operator productivity suite v2.

@@ -13,13 +13,16 @@ URL aplikasi: **https://salesai.prestisa.net**
 2. [Inbox — Membalas Chat Customer](#2-inbox--membalas-chat-customer)
 3. [Chat Detail — Tools Lengkap saat Membalas](#3-chat-detail--tools-lengkap-saat-membalas)
 4. [Sales Pipeline — Tracking Deal](#4-sales-pipeline--tracking-deal)
+   - 4.6 [Tasks — Reminder & Follow-up](#46-tasks--reminder--follow-up)
+   - 4.7 [Notifications — Bell Icon Top Bar](#47-notifications--bell-icon-top-bar)
+   - 4.8 [Internal Comments + @Mention](#48-internal-comments--mention)
 5. [AI Monitor — Lihat Performa AI & Tim](#5-ai-monitor--lihat-performa-ai--tim)
 6. [Persona & Settings AI](#6-persona--settings-ai)
 7. [Knowledge Base](#7-knowledge-base)
 8. [Reply Templates & Snippets](#8-reply-templates--snippets)
 9. [Tags](#9-tags)
 10. [Promo Settings](#10-promo-settings)
-11. [User Management](#11-user-management)
+11. [User Management + Profil Pribadi](#11-user-management)
 12. [Mobile View](#12-mobile-view)
 13. [FAQ Operator](#13-faq-operator)
 
@@ -35,6 +38,7 @@ Setelah login, navbar atas berisi 10 menu utama:
 |---|---|
 | **Inbox** | Daftar percakapan WhatsApp customer (default landing page) |
 | **Pipeline** | Kanban board untuk tracking deal stage |
+| **Tasks** | Task & reminder per operator (per-conv atau standalone) |
 | **Monitor** | Dashboard performa AI, operator, conversion |
 | **Persona** | Setting AI Tiara + global toggle |
 | **Knowledge** | KB topics yang AI bisa kutip |
@@ -42,10 +46,10 @@ Setelah login, navbar atas berisi 10 menu utama:
 | **Tags** | Master tag untuk klasifikasi conversation |
 | **Promo** | Setting promo aktif yang AI bisa sebut |
 | **SQL** | Query SQL aman untuk owner (read-only) |
-| **Users** | Manage akun operator (admin only) |
+| **Users** | Manage akun operator (admin only) + profil pribadi (Telegram) |
 | **Snippets** | Snippet pribadi operator |
 
-Pojok kanan atas: tombol search (`⌘K`), email user yang login, ikon settings (⚙), tombol Logout.
+Pojok kanan atas: tombol search (`⌘K`), 🔔 **bell notifikasi** dengan badge unread, email user, ikon settings (⚙), tombol Logout.
 
 ---
 
@@ -191,6 +195,109 @@ Di mobile (< 768px), kanban berubah jadi vertical list:
 - Tab horizontal scroll di atas — pilih stage
 - List card vertikal di bawah
 - Tap "⋯" di card → bottom sheet "Pindah ke stage..."
+
+---
+
+## 4.6 Tasks — Reminder & Follow-up
+
+![Tasks page](assets/screenshots/12-tasks.png)
+
+Halaman `/tasks` untuk track to-do operator. Task bisa **conv-scoped** (terkait chat tertentu) atau **standalone** (operasional umum).
+
+### 4.6.1 Anatomi page
+
+- Tombol **+ New task** di kanan atas → modal composer
+- Filter **Owner: Me** (default) + **Status: Active** (open + in_progress)
+- List grouped by due:
+  - 🚨 **Overdue** — sudah lewat deadline + belum done
+  - **Hari ini** — due dalam 24 jam
+  - **Besok** — due besok
+  - **Nanti** — due >2 hari ke depan
+  - **Tanpa due date**
+
+### 4.6.2 Composer task baru
+
+Field:
+- **Title** (wajib)
+- **Body** (detail opsional)
+- **Owner** dropdown — pilih self atau operator lain (assignment notif otomatis)
+- **Priority** — low / normal / 🔴 high
+- **Due datetime** — default besok 17:00 WIB
+- **Conv ID** (opsional) — link ke conversation tertentu
+
+### 4.6.3 Status transitions
+
+`open → in_progress → done` dengan inline action di card:
+- **▶ Start** — pindahkan ke in_progress
+- **✓ Done** — selesai
+- **💤** — snooze 4 jam (push due_at + reset reminder flag)
+- **✗** — cancel
+- **🗑** — hapus
+
+Task done tetap di-list selama 7 hari sebagai history.
+
+### 4.6.4 Reminder
+
+Cron tiap 5 menit cek task due ≤1 jam ke depan + masih active:
+- Insert in-app notification (bell icon)
+- Kirim Telegram personal (jika operator opt-in di profil — lihat 11.2)
+
+Overdue >24 jam → kirim notif "🚨 Task overdue".
+
+### 4.6.5 Conv-scoped task
+
+Buka chat detail → sidebar customer → section **📋 Tasks** → klik **+ tambah** untuk task quick (title + due) yang otomatis link ke conv.
+
+---
+
+## 4.7 Notifications — Bell Icon Top Bar
+
+🔔 di pojok kanan top bar dengan badge merah jumlah unread.
+
+Klik → dropdown 10 notif terakhir. Tipe notif:
+
+| Icon | Kind | Trigger |
+|---|---|---|
+| 📋 | `task_assigned` | Task di-assign ke kamu |
+| ⏰ | `task_due` | Task due ≤1 jam |
+| 🚨 | `task_overdue` | Task overdue >24 jam |
+| 💬 | `mention` | Operator lain mention `@kamu` di internal comment |
+
+Klik notif → mark read + navigate ke conv/task terkait.
+
+Tombol **Mark all read** untuk clear semua.
+
+Polling badge tiap 30 detik. Browser push juga didukung kalau enable di /inbox tombol 🔔 Enable notif.
+
+---
+
+## 4.8 Internal Comments + @Mention
+
+Section di sidebar chat detail (`💬 Internal comments`).
+
+**Berbeda dengan Notes:** Notes = catatan static profile customer ("DOB 5 Jan, suka lily"). Internal comments = thread kolaborasi tim per chat ("@andi tolong cek invoice ini").
+
+### 4.8.1 Cara mention
+
+Ketik `@` di composer → dropdown autocomplete operator aktif muncul:
+- ↑↓ navigate
+- Tab/Enter pilih → token `@username` masuk text
+- Esc tutup
+
+Multiple mention per komentar OK (`@andi @rahma tolong handle ini`).
+
+### 4.8.2 Notifikasi mention
+
+Saat submit komentar dengan mention:
+- Setiap operator yang di-mention dapat 💬 notif (in-app bell)
+- Kalau target opt-in Telegram personal → kirim DM juga
+- Self-mention skip (no notif untuk diri sendiri)
+
+### 4.8.3 Visibility
+
+Internal comments **TIDAK pernah masuk WhatsApp** — operator only. Customer tidak melihat.
+
+Comment juga ter-render dengan `@username` highlight warna.
 
 ---
 
@@ -394,7 +501,7 @@ Edit langsung tanpa redeploy. AI cek setiap reply.
 
 ![Users](assets/screenshots/10-users.png)
 
-**Admin only.** Manage akun operator:
+### 11.1 Manage operator (admin only)
 
 ### 11.1 Tambah user baru
 
@@ -412,6 +519,21 @@ Tiap baris:
 - **Reset PW** — set password baru
 
 Operator yang baru login → otomatis masuk presence (badge online di tabel + di chat header).
+
+### 11.2 Profil pribadi — Telegram personal binding
+
+Section paling atas di `/users` (visible untuk semua operator, bukan hanya admin) — **Profil saya**.
+
+Set Telegram chat ID untuk terima notif task & mention langsung di HP:
+
+1. Buka Telegram → chat `@userinfobot` → bot reply ID kamu (mis. `987654321`)
+2. Paste ID di field **Telegram chat ID** di profil
+3. Klik **Simpan**
+4. Klik **✈️ Test** → bot Tiara CRM kirim greeting ke chat kamu untuk verifikasi
+
+Setelah opt-in, semua notifikasi (task assigned, task due, mention) otomatis dikirim ke Telegram personal kamu *plus* in-app bell.
+
+Kalau bot tidak di-set token-nya di `/ai-settings`, fitur Telegram personal tidak aktif (cuma in-app yang jalan).
 
 ---
 
@@ -455,7 +577,13 @@ Semua action drag-drop di mobile diganti dengan tap → bottom sheet menu.
 - Atau buat saved view (defer ke v2 — sementara pakai URL `/pipeline?type=wedding`).
 
 **Q: Bagaimana track follow-up commitment?**
-- Operator productivity suite (#tasks) — defer ke v2 sub-project. Sementara pakai snippet pribadi atau Telegram self-message.
+- Buka `/tasks` → klik **+ New task** → set due datetime + priority → assign ke diri / operator lain. Reminder otomatis 1 jam sebelum due via bell + Telegram personal kalau opt-in.
+
+**Q: Cara minta tolong rekan operator handle conv tertentu?**
+- Buka chat detail → sidebar `💬 Internal comments` → ketik `@username` → autocomplete → submit. Yang di-mention dapat notifikasi langsung.
+
+**Q: Bagaimana operator dapat notif task di HP?**
+- Buka `/users` → section **Profil saya** → paste Telegram chat ID → klik Test → kalau bot Tiara di-set di `/ai-settings`, semua notif task & mention juga ke Telegram personal kamu.
 
 **Q: Customer balas digit angka 1-5?**
 - Auto-detected sebagai CSAT response (kalau pesan terakhir kamu adalah CSAT request). Tidak akan trigger AI reply.
@@ -485,6 +613,7 @@ Sistem menjalankan task otomatis via cron Linux:
 |---|---|---|
 | Setiap menit | SLA watcher | Alert handover yang lewat SLA |
 | Setiap 5 menit | Followup worker | Kirim pesan followup terjadwal |
+| Setiap 5 menit | Task reminder | Notif task due ≤1 jam + overdue >24 jam |
 | Setiap 10 menit | Unpaid reminder | Reminder customer yang submit form tapi belum bayar |
 | Setiap 15 menit | Anomaly detector | Alert spike komplain/refund/handover |
 | Setiap 15 menit | Delivery comms | Kirim paid_confirm + H-1 + H+1 CSAT request |
@@ -498,5 +627,5 @@ Sistem menjalankan task otomatis via cron Linux:
 
 ---
 
-**Versi manual**: 1.0 (2026-05-02). Update terakhir: deploy sales pipeline v1.
+**Versi manual**: 1.1 (2026-05-02). Update terakhir: deploy operator productivity suite v1 (tasks + notifications + internal comments + Telegram personal).
 **Bug / saran:** lapor ke admin via Telegram channel ops.
