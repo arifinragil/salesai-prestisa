@@ -93,6 +93,19 @@ function collectToolPrices(toolCalls) {
   return prices;
 }
 
+// Anti-halusinasi: kalau AI bilang "tidak tersedia/tidak ada produk/stok kosong"
+// tapi tidak ada call ke search_products di iterasi ini → reject, force retry
+// dengan tool call. Cegah AI rely on conversation memory.
+const UNAVAIL_PATTERNS = /\b(tidak (ada|tersedia)|stok kosong|belum (ada|tersedia)|tidak punya|tidak menemukan|kosong di area|tidak ditemukan|out of stock|sold out)\b/i;
+
+function hasUnavailabilityClaim(reply) {
+  return UNAVAIL_PATTERNS.test(String(reply || ''));
+}
+
+function calledSearchTool(toolCalls) {
+  return (toolCalls || []).some((c) => /^(search_products|kb_search|find_customer_orders)$/.test(c.name));
+}
+
 function checkReply({ reply, toolCalls }) {
   if (!reply) return { passed: false, reason: 'empty_reply' };
 
@@ -102,6 +115,14 @@ function checkReply({ reply, toolCalls }) {
 
   if (hasSpecificEta(reply)) {
     return { passed: false, reason: 'specific_eta' };
+  }
+
+  if (hasUnavailabilityClaim(reply) && !calledSearchTool(toolCalls)) {
+    return {
+      passed: false,
+      reason: 'unavailability_without_search',
+      detail: 'AI claim tidak tersedia tapi tidak panggil search_products/kb_search di iterasi ini.',
+    };
   }
 
   const mentioned = extractPriceMentions(reply);
@@ -121,5 +142,7 @@ module.exports = {
   extractPriceMentions,
   hasHesitation,
   hasSpecificEta,
+  hasUnavailabilityClaim,
+  calledSearchTool,
   collectToolPrices,
 };
