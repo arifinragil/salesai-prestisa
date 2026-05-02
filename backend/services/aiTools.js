@@ -235,11 +235,15 @@ function inferCodePrefixes(category, productType) {
   else if (t === 'cake' || /kue|cake|tart/.test(s)) jenisCode = 'CK';
   else if (t === 'parsel' || /parsel|hampers|paket/.test(s)) jenisCode = 'P';
 
-  // Sub-kategori (digit 3-4)
+  // Sub-kategori (digit 3-4):
+  // - Duka cita = sad/belasungkawa → BPDC
+  // - Suka cita = happy. Default ke BPC- (congratulations); kalau ada konteks
+  //   wedding/pernikahan, override ke BPW-
+  // Wedding selalu lebih spesifik, dicek dulu.
   let subCode = null;
-  if (/duka|belasungkawa|kondolensi/.test(s)) subCode = 'DC';
-  else if (/sukacita|suka cita|selamat|congratulations|congrat/.test(s)) subCode = 'C-';
-  else if (/wedding|pernikahan|nikah/.test(s)) subCode = 'W-';
+  if (/wedding|pernikahan|nikah|menikah|akad|resepsi/.test(s)) subCode = 'W-';
+  else if (/duka|belasungkawa|kondolensi/.test(s)) subCode = 'DC';
+  else if (/sukacita|suka cita|selamat|congratulations|congrat|opening|grand opening|ucapan/.test(s)) subCode = 'C-';
   else if (/kertas/.test(s)) subCode = 'KS';
   else if (/kayu/.test(s)) subCode = 'KY';
 
