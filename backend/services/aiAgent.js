@@ -311,8 +311,8 @@ async function processOne() {
        WHERE m.direction = 'out' AND m.sender_type IN ('ai','staff','system')
          AND m.shadow = FALSE
          AND m.created_at > now() - interval '1 hour'
-         AND ($2::text IS NULL OR c.wa_session = $2)`,
-      [null, conv.wa_session]
+         AND ($1::text IS NULL OR c.wa_session = $1)`,
+      [conv.wa_session]
     );
     if (sentLastHour.rows[0].n >= hourCap) {
       const hoId = await recordHandover(client, {
@@ -340,8 +340,8 @@ async function processOne() {
        WHERE m.direction = 'out' AND m.sender_type IN ('ai','staff','system')
          AND m.shadow = FALSE
          AND m.created_at::date = current_date
-         AND ($2::text IS NULL OR c.wa_session = $2)`,
-      [null, conv.wa_session]
+         AND ($1::text IS NULL OR c.wa_session = $1)`,
+      [conv.wa_session]
     );
     if (sentToday.rows[0].n >= dailyCap) {
       const hoId = await recordHandover(client, {
@@ -662,7 +662,7 @@ async function processOne() {
 
     return { ok: true, sent: true, conversation_id: conv.id, score };
   } catch (err) {
-    logger.error({ err: err.message, jobId: job.id }, '[aiAgent] processing failed');
+    logger.error({ err: err.message, stack: err.stack, jobId: job.id }, '[aiAgent] processing failed');
     try {
       await markJob(client, job.id, 'failed', err.message);
     } catch {}

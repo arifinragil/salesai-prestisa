@@ -132,8 +132,8 @@ async function apply(client, convId, event, options = {}) {
            pipeline_stage_at = now(),
            manual_stage_override = $3,
            pipeline_stage_history = pipeline_stage_history || $4::jsonb,
-           lost_reason = CASE WHEN $5 THEN $6 ELSE NULL END,
-           lost_note   = CASE WHEN $5 THEN $7 ELSE NULL END,
+           lost_reason = CASE WHEN $5 THEN $6::varchar ELSE NULL END,
+           lost_note   = CASE WHEN $5 THEN $7::text    ELSE NULL END,
            updated_at = now()
      WHERE id = $1`,
     [convId, toStage, nextOverride, JSON.stringify(histEntry),
