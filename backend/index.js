@@ -22,6 +22,7 @@ const tasksRoutes = require('./routes/tasks');
 const notificationsRoutes = require('./routes/notifications');
 const savedViewsRoutes = require('./routes/savedViews');
 const healthRoutes = require('./routes/health');
+const suggestionsRoutes = require('./routes/suggestions');
 
 const aiAgent = require('./services/aiAgent');
 
@@ -52,6 +53,7 @@ app.use('/uploads', express.static(UPLOAD_ROOT, { etag: true, lastModified: true
 
 app.use('/api/auth', authRoutes);
 app.use('/api/inbox', inboxRoutes);
+app.use('/api/inbox/conversations/:id/suggestions', suggestionsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/waha', wahaAdminRoutes);
 app.use('/api/ops', operatorToolsRoutes);
