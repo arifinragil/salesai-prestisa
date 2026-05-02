@@ -423,6 +423,17 @@ async function get_faq({ args }) {
 async function kb_search({ args }) {
   const q = String(args.query || '').trim();
   if (!q) return { error: 'query required' };
+  if (!process.env.OPENAI_API_KEY) {
+    // Embeddings via OpenAI not configured — fallback ke list semua topic.
+    // AI bisa pilih topic yang paling relevan via get_faq.
+    const { listFaqTopics } = require('./aiKnowledge');
+    const topics = await listFaqTopics();
+    return {
+      fallback: 'embeddings_unavailable',
+      note: 'kb_search semantic disabled (OPENAI_API_KEY not set). Pakai get_faq dengan topic yang relevan dari list di bawah.',
+      available_topics: topics,
+    };
+  }
   try {
     const rag = require('./aiKbRag');
     const hits = await rag.search(q, 3);
