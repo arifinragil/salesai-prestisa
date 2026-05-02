@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import { fetcher, api } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { formatRupiah, formatRelative, formatPhone } from '@/lib/format';
+import InternalCommentsBlock from './InternalCommentsBlock';
 
 const TAG_COLOR = {
   slate:'bg-slate-100 text-slate-700 border-slate-200',
@@ -14,6 +15,83 @@ const TAG_COLOR = {
   violet:'bg-violet-100 text-violet-700 border-violet-200',
   pink:'bg-pink-100 text-pink-700 border-pink-200',
 };
+
+function ConvTasksBlock({ convId, toast }) {
+  const { data, mutate } = useSWR(
+    convId ? `/api/tasks/conv/${convId}` : null,
+    fetcher,
+    { refreshInterval: 30_000 }
+  );
+  const [showAdd, setShowAdd] = useState(false);
+  const [draft, setDraft] = useState({ title: '', due_at: '' });
+
+  async function add() {
+    if (!draft.title) return;
+    try {
+      await api('/api/tasks', { method: 'POST', body: {
+        title: draft.title, conversation_id: convId,
+        due_at: draft.due_at || null,
+      }});
+      setDraft({ title: '', due_at: '' });
+      setShowAdd(false);
+      mutate();
+      toast.success('Task ditambahkan');
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function setStatus(id, status) {
+    try {
+      await api(`/api/tasks/${id}/status`, { method: 'POST', body: { status } });
+      mutate();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  const items = data?.items || [];
+  return (
+    <section className="space-y-2">
+      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+        <span>📋 Tasks ({items.length})</span>
+        <button onClick={() => setShowAdd(!showAdd)} className="text-[10px] text-brand-600 hover:underline">
+          {showAdd ? 'tutup' : '+ tambah'}
+        </button>
+      </div>
+      {showAdd && (
+        <div className="bg-white rounded-md border border-slate-200 p-2 space-y-1">
+          <input
+            value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            placeholder="Title task…"
+            className="w-full px-2 py-1 text-xs border border-slate-200 rounded"
+          />
+          <input
+            type="datetime-local" value={draft.due_at}
+            onChange={(e) => setDraft({ ...draft, due_at: e.target.value })}
+            className="w-full px-2 py-1 text-xs border border-slate-200 rounded"
+          />
+          <button onClick={add} className="w-full text-xs px-2 py-1 rounded bg-brand-500 text-white">
+            Save
+          </button>
+        </div>
+      )}
+      {items.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {items.map((t) => (
+            <li key={t.id} className="bg-white rounded-md border border-slate-200 p-2">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-slate-800 flex-1 truncate" title={t.title}>{t.title}</span>
+                <button onClick={() => setStatus(t.id, 'done')} className="text-emerald-600 hover:bg-emerald-50 rounded px-1" title="Done">✓</button>
+              </div>
+              {t.due_at && (
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  Due {new Date(t.due_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function PipelineBlock({ conv, onMutate, toast }) {
   const [showLost, setShowLost] = useState(false);
@@ -445,6 +523,8 @@ export default function CustomerPanel({ convId }) {
 
         <NotesBlock convId={convId} toast={toast} />
         <TagsBlock convId={convId} toast={toast} />
+        <InternalCommentsBlock convId={convId} />
+        <ConvTasksBlock convId={convId} toast={toast} />
 
         {/* Manual phone entry for LID-locked conversations */}
         {p.is_lid && (

@@ -55,6 +55,9 @@ export default function UsersPage() {
           {!isAdmin && <span className="text-xs text-amber-700">read-only — admin role required to edit</span>}
         </div>
 
+        <MyProfileBlock />
+
+
         {isAdmin && (
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <h2 className="text-sm font-semibold text-slate-700 mb-3">Tambah user baru</h2>
@@ -158,5 +161,56 @@ export default function UsersPage() {
         </div>
       </div>
     </Layout>
+  );
+}
+
+function MyProfileBlock() {
+  const me = useSWR('/api/users/me', fetcher);
+  const toast = useToast();
+  const [chatId, setChatId] = useState('');
+  const [hydrated, setHydrated] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  if (me.data?.user && !hydrated) {
+    setChatId(me.data.user.telegram_chat_id || '');
+    setHydrated(true);
+  }
+
+  async function save() {
+    try {
+      await api('/api/users/me/telegram', { method: 'PUT', body: { telegram_chat_id: chatId.trim() } });
+      toast.success('Tersimpan');
+      me.mutate();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function test() {
+    setTesting(true);
+    try {
+      await api('/api/users/me/telegram-test', { method: 'POST' });
+      toast.success('Telegram test sent — cek HP kamu');
+    } catch (e) { toast.error('Gagal: ' + e.message); }
+    finally { setTesting(false); }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-4">
+      <h2 className="text-sm font-semibold text-slate-700 mb-1">Profil saya</h2>
+      <p className="text-xs text-slate-500 mb-3">
+        Atur chat ID Telegram pribadi untuk terima notif task & mention langsung di HP.
+        Cara dapat chat ID: chat <code className="bg-slate-100 px-1 rounded">@userinfobot</code> di Telegram → bot reply ID.
+      </p>
+      <div className="flex gap-2">
+        <input value={chatId} onChange={(e) => setChatId(e.target.value)}
+          placeholder="Telegram chat ID (mis. 987654321)"
+          className="flex-1 px-2 py-1.5 text-sm border border-slate-200 rounded font-mono" />
+        <button onClick={save} className="text-sm px-3 py-1.5 rounded bg-brand-500 text-white hover:bg-brand-600">
+          Simpan
+        </button>
+        <button onClick={test} disabled={testing || !chatId.trim()}
+          className="text-sm px-3 py-1.5 rounded border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">
+          {testing ? '…' : '✈️ Test'}
+        </button>
+      </div>
+    </div>
   );
 }
