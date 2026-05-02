@@ -31,6 +31,7 @@ router.get('/board', async (req, res) => {
     `SELECT c.id, c.phone, c.real_phone, c.push_name, c.pipeline_stage, c.pipeline_type,
             c.deal_value_idr, c.deal_value_locked, c.manual_stage_override,
             c.last_message_at, c.lost_reason,
+            c.lead_temperature, c.lead_score,
             (SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
              FROM crm_tags t JOIN crm_conversation_tags ct ON ct.tag_id=t.id
              WHERE ct.conversation_id=c.id) AS tags,

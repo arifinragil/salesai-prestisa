@@ -149,6 +149,13 @@ async function apply(client, convId, event, options = {}) {
   );
 
   logger.info({ convId, fromStage, toStage, source: options.source }, '[pipeline] transition');
+
+  // Refresh lead temperature — pipeline stage shift changes score (qualified +20, lost -15).
+  try {
+    const leadTemp = require('./leadTemperature');
+    leadTemp.compute(convId).catch((err) => console.warn('[leadTemp] pipeline hook failed:', err.message));
+  } catch {}
+
   return { applied: true, fromStage, toStage, reason: 'transition_applied' };
 }
 

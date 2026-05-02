@@ -147,6 +147,14 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
       return res.json({ success: true, conversation_id: conv.id, message_id: msg.id, spam_blocked: true });
     }
 
+    // Lead temperature — refresh on every inbound (per spec §6.3).
+    // Fire-and-forget: must not block ingest.
+    try {
+      const leadTemp = require('../services/leadTemperature');
+      leadTemp.compute(conv.id, { inboundBody: parsed.body, intent: null })
+        .catch((err) => console.warn('[leadTemp] compute failed:', err.message));
+    } catch {}
+
     // Debounce: process_after = now()+10s. If sibling pending jobs exist for
     // this conv, push them forward to the same time so the worker picks only
     // the latest one and treats the burst as a single user turn.

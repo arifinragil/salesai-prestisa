@@ -4,7 +4,7 @@ import { api, fetcher } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { useSocket } from '@/lib/useSocket';
 
-export default function CoPilotPanel({ conversationId, onUseSuggestion }) {
+export default function CoPilotPanel({ conversationId, onUseSuggestion, leadTemp }) {
   const toast = useToast();
   const swrKey = conversationId
     ? `/api/inbox/conversations/${conversationId}/suggestions/latest`
@@ -102,6 +102,11 @@ export default function CoPilotPanel({ conversationId, onUseSuggestion }) {
       </button>
       {!collapsed && (
         <div className="px-3 pb-3 space-y-2">
+          {leadTemp === 'hot' && (
+            <div className="text-xs px-2 py-1 bg-rose-50 border border-rose-200 rounded text-rose-700 font-medium">
+              🔥 Hot lead — close ASAP
+            </div>
+          )}
           {lowConf && (
             <div className="text-xs px-2 py-1 bg-amber-50 border border-amber-200 rounded text-amber-800">
               🔍 Konteks belum jelas — review extra hati-hati

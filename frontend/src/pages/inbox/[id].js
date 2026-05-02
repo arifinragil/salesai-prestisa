@@ -11,6 +11,7 @@ import { useToast } from '@/components/Toast';
 import { convStatusLabel, formatRelative, formatPhone } from '@/lib/format';
 import PipelineStageBadge from '@/components/PipelineStageBadge';
 import CoPilotPanel from '@/components/CoPilotPanel';
+import LeadTempBadge from '@/components/LeadTempBadge';
 
 export default function ChatDetail() {
   const router = useRouter();
@@ -318,6 +319,9 @@ export default function ChatDetail() {
                 {convData?.last_intent && (
                   <span className="text-[10px] text-slate-400 hidden sm:inline">· {convData.last_intent}</span>
                 )}
+                {convData?.lead_temperature && (
+                  <LeadTempBadge temp={convData.lead_temperature} score={convData.lead_score} showScore size="sm" />
+                )}
                 {isSnoozed && (
                   <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
                     💤 snooze s/d {new Date(convData.snoozed_until).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
@@ -601,6 +605,7 @@ export default function ChatDetail() {
         {aiMode === 'copilot' && (
           <CoPilotPanel
             conversationId={id}
+            leadTemp={convData?.lead_temperature}
             onUseSuggestion={({ logId, rank, text }) => {
               setDraft(text);
               setPendingSuggestion({ logId, rank, originalText: text });

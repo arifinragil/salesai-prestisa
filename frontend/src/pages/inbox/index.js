@@ -8,6 +8,7 @@ import { useSocket } from '@/lib/useSocket';
 import { useNotifPermission, useNotificationSound, showBrowserNotification } from '@/lib/useNotifications';
 import { formatRelative, truncate, convStatusLabel, formatPhone, formatDisplayName, isLidPhone } from '@/lib/format';
 import PipelineStageBadge from '@/components/PipelineStageBadge';
+import LeadTempBadge from '@/components/LeadTempBadge';
 
 const TAG_COLOR = {
   slate:'bg-slate-100 text-slate-700 border-slate-200',
@@ -35,6 +36,7 @@ export default function InboxList() {
   const [queue, setQueue] = useState('');
   const [tagId, setTagId] = useState('');
   const [stageFilter, setStageFilter] = useState('');
+  const [sortBy, setSortBy] = useState('recent');
   const [selected, setSelected] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const playSound = useNotificationSound();
@@ -48,6 +50,7 @@ export default function InboxList() {
   if (queue) params.set('queue', queue);
   if (tagId) params.set('tag_id', tagId);
   if (stageFilter) params.set('pipeline_stage', stageFilter);
+  if (sortBy && sortBy !== 'recent') params.set('sort', sortBy);
   const url = `/api/inbox/conversations${params.toString() ? '?' + params.toString() : ''}`;
   const sessions = useSWR('/api/inbox/wa-sessions', fetcher, { refreshInterval: 60_000 });
   const tags = useSWR('/api/ops/tags', fetcher, { refreshInterval: 120_000 });
@@ -215,6 +218,15 @@ export default function InboxList() {
             <option value="delivered">Delivered</option>
             <option value="lost">Lost</option>
           </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-slate-200 rounded-md bg-white"
+            title="Sort"
+          >
+            <option value="recent">Sort: Recent</option>
+            <option value="temp">🔥 Sort: Temperature</option>
+          </select>
         </div>
 
         {selected.size > 0 && (
@@ -314,6 +326,9 @@ export default function InboxList() {
                             <span className="text-xs text-slate-400">
                               · {conv.last_intent}
                             </span>
+                          )}
+                          {conv.lead_temperature && conv.lead_temperature !== 'cold' && (
+                            <LeadTempBadge temp={conv.lead_temperature} score={conv.lead_score} size="xs" />
                           )}
                         </div>
                         <div className="text-sm text-slate-500 mt-0.5 truncate">
