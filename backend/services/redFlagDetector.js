@@ -238,6 +238,47 @@ async function ruleColdLeadIgnored() {
   })).filter((f) => f.staff_id);
 }
 
+// ── Rule: discount_unauthorized (high) ───────────────────────────────────
+// Operator outbound says "diskon N%" or "promo CODE" but no matching
+// active promo in crm_promo_settings at message time. Conservative: only
+// flag percentage mentions, ignore casual word "promo" without code.
+async function ruleDiscountUnauthorized() {
+  const r = await pg.query(
+    `SELECT m.id AS msg_id, m.conversation_id, m.body, m.created_at,
+            c.assigned_staff_id AS staff_id
+     FROM crm_messages m JOIN crm_conversations c ON c.id = m.conversation_id
+     WHERE m.direction = 'out' AND m.sender_type = 'staff'
+       AND m.created_at > now() - interval '1 hour'
+       AND c.assigned_staff_id IS NOT NULL`
+  );
+  const PCT_RE = /\b(?:diskon|disc|potongan|promo)\s*(\d{1,2})\s*%/gi;
+  const flags = [];
+  for (const row of r.rows) {
+    const text = String(row.body || '');
+    const matches = [...text.matchAll(PCT_RE)];
+    if (matches.length === 0) continue;
+    // Fetch active promos at the message timestamp
+    const promosQ = await pg.query(
+      `SELECT code, discount_pct FROM crm_promo_settings
+       WHERE active = TRUE AND starts_at <= $1 AND ends_at >= $1`,
+      [row.created_at]
+    );
+    const allowedPcts = new Set(
+      promosQ.rows.map((p) => p.discount_pct != null ? Math.round(Number(p.discount_pct)) : null).filter((x) => x != null)
+    );
+    const orphans = matches
+      .map((m) => parseInt(m[1]))
+      .filter((pct) => !allowedPcts.has(pct));
+    if (orphans.length === 0) continue;
+    flags.push({
+      staff_id: row.staff_id, conversation_id: row.conversation_id,
+      rule_id: 'discount_unauthorized', severity: 'high',
+      detail: { msg_id: row.msg_id, mentioned_pct: orphans, allowed_pcts: [...allowedPcts] },
+    });
+  }
+  return flags;
+}
+
 // ── Rule: handover_overuse (low) ─────────────────────────────────────────
 async function ruleHandoverOveruse() {
   const r = await pg.query(
@@ -264,6 +305,7 @@ async function evaluateRealtime() {
     ...(await ruleFlaggedSuggestion().catch((e) => (logger.warn({err:e.message},'ruleFlaggedSuggestion'),[]))),
     ...(await rulePiiLeak().catch((e) => (logger.warn({err:e.message},'rulePiiLeak'),[]))),
     ...(await rulePolicyViolation().catch((e) => (logger.warn({err:e.message},'rulePolicyViolation'),[]))),
+    ...(await ruleDiscountUnauthorized().catch((e) => (logger.warn({err:e.message},'ruleDiscountUnauthorized'),[]))),
   ];
 }
 
@@ -284,5 +326,5 @@ module.exports = {
   ruleSlowFirstResponse, ruleMissedFollowup, ruleSuggestionDeviation,
   ruleManualOverrideHigh, ruleFlaggedSuggestion, ruleLostNoReason,
   ruleCsatLow, rulePiiLeak, rulePolicyViolation, ruleColdLeadIgnored,
-  ruleHandoverOveruse,
+  ruleHandoverOveruse, ruleDiscountUnauthorized,
 };
