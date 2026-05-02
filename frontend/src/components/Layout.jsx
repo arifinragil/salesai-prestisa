@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react';
 import { useUser } from '@/lib/useUser';
 import { api } from '@/lib/api';
 import MessageSearch from './MessageSearch';
+import NotificationsBell from './NotificationsBell';
 
 const navItems = [
   { href: '/inbox',           label: 'Inbox',     short: 'Inbox' },
   { href: '/pipeline',        label: 'Pipeline',  short: 'Pipe' },
+  { href: '/tasks',           label: 'Tasks',     short: 'Tasks' },
   { href: '/ai-monitor',      label: 'Monitor',   short: 'Monitor' },
   { href: '/ai-settings',     label: 'Persona',   short: 'Persona' },
   { href: '/knowledge',       label: 'Knowledge', short: 'KB' },
@@ -131,6 +133,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
               <span>🔍 Cari</span>
               <kbd className="text-[10px] px-1 py-0.5 bg-slate-100 rounded border border-slate-200 text-slate-500">⌘K</kbd>
             </button>
+            <NotificationsBell />
             <span className="hidden lg:inline text-sm text-slate-500 truncate max-w-[160px]" title={`${user.username} (${user.role})`}>
               {user.username} ({user.role})
             </span>

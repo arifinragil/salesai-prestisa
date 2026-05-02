@@ -49,6 +49,12 @@ async function run() {
       baselineSql: `SELECT 0::int AS n`,
       absoluteThreshold: 10,
     },
+    {
+      kind: 'tasks_overdue_spike', label: 'Tasks overdue >48h',
+      lastHourSql: `SELECT COUNT(*)::int AS n FROM crm_tasks WHERE status IN ('open','in_progress') AND due_at < now() - interval '48 hours'`,
+      baselineSql: `SELECT 0::int AS n`,
+      absoluteThreshold: 5,
+    },
   ];
 
   for (const c of checks) {

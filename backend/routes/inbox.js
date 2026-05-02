@@ -940,4 +940,123 @@ router.post('/handovers/:id/resolve', async (req, res) => {
   res.json({ success: true });
 });
 
+// ── Internal comments per conv (operator collaboration with @mention) ──
+router.get('/conversations/:id/comments', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { rows } = await pg.query(
+    `SELECT c.id, c.body, c.mentions, c.created_at, c.staff_id,
+            u.username, u.full_name
+     FROM crm_internal_comments c
+     LEFT JOIN staff_users u ON u.id = c.staff_id
+     WHERE c.conversation_id = $1 ORDER BY c.id ASC LIMIT 200`,
+    [id]
+  );
+  res.json({ success: true, items: rows });
+});
+
+router.post('/conversations/:id/comments', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const body = (req.body?.body || '').toString().trim();
+  if (!body) return res.status(400).json({ success: false, message: 'body required' });
+  if (body.length > 4000) return res.status(400).json({ success: false, message: 'body max 4000 chars' });
+
+  const mentionParser = require('../services/mentionParser');
+  // Re-validate server-side regardless of client-supplied mentions
+  const mentions = await mentionParser.parse(pg, body);
+
+  const { rows } = await pg.query(
+    `INSERT INTO crm_internal_comments (conversation_id, staff_id, body, mentions)
+     VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+    [id, req.staff.staff_id, body, mentions]
+  );
+
+  // Notify mentioned users (skip self)
+  try {
+    const notif = require('../services/notificationsService');
+    const conv = await pg.query(`SELECT phone, push_name FROM crm_conversations WHERE id = $1`, [id]);
+    const phone = conv.rows[0]?.push_name || conv.rows[0]?.phone || `#${id}`;
+    for (const targetId of mentions) {
+      if (targetId === req.staff.staff_id) continue;
+      await notif.notify(targetId, 'mention', `${req.staff.username} mention kamu di ${phone}`,
+        { body: body.slice(0, 200), link: `/inbox/${id}`, payload: { conv_id: id, comment_id: rows[0].id } });
+    }
+  } catch {}
+
+  res.json({ success: true, id: rows[0].id, mentions });
+});
+
+// ── Bulk actions (extended) ────────────────────────────────────────────────
+async function processBulk(ids, fn) {
+  let ok = 0, failed = 0;
+  const errors = [];
+  for (const id of ids) {
+    try {
+      await fn(id);
+      ok++;
+    } catch (err) {
+      failed++;
+      errors.push({ conv_id: id, message: err.message });
+    }
+  }
+  return { ok, failed, errors };
+}
+
+router.post('/bulk-assign', async (req, res) => {
+  const ids = (req.body?.conv_ids || []).map((n) => parseInt(n)).filter(Boolean);
+  const staffId = req.body?.staff_id ? parseInt(req.body.staff_id) : null;
+  if (!ids.length) return res.status(400).json({ success: false, message: 'conv_ids required' });
+  const r = await processBulk(ids, async (id) => {
+    await pg.query(`UPDATE crm_conversations SET assigned_staff_id = $2, updated_at = now() WHERE id = $1`, [id, staffId]);
+    notify.notifyConvUpdated(id);
+  });
+  res.json({ success: true, ...r });
+});
+
+router.post('/bulk-snooze', async (req, res) => {
+  const ids = (req.body?.conv_ids || []).map((n) => parseInt(n)).filter(Boolean);
+  const hours = parseInt(req.body?.hours);
+  if (!ids.length || !hours || hours < 1 || hours > 720) {
+    return res.status(400).json({ success: false, message: 'conv_ids + hours 1-720 required' });
+  }
+  const r = await processBulk(ids, async (id) => {
+    await pg.query(
+      `UPDATE crm_conversations SET snoozed_until = now() + ($2 || ' hours')::interval,
+         snoozed_by = $3, updated_at = now() WHERE id = $1`,
+      [id, String(hours), req.staff.staff_id]
+    );
+    notify.notifyConvUpdated(id);
+  });
+  res.json({ success: true, ...r });
+});
+
+router.post('/bulk-close', async (req, res) => {
+  const ids = (req.body?.conv_ids || []).map((n) => parseInt(n)).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ success: false, message: 'conv_ids required' });
+  const r = await processBulk(ids, async (id) => {
+    await pg.query(`UPDATE crm_conversations SET status = 'closed', updated_at = now() WHERE id = $1`, [id]);
+    notify.notifyConvUpdated(id);
+  });
+  res.json({ success: true, ...r });
+});
+
+router.post('/bulk-tag', async (req, res) => {
+  const ids = (req.body?.conv_ids || []).map((n) => parseInt(n)).filter(Boolean);
+  const tagId = parseInt(req.body?.tag_id);
+  const action = req.body?.action;
+  if (!ids.length || !tagId || !['add', 'remove'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'conv_ids + tag_id + action(add|remove) required' });
+  }
+  const r = await processBulk(ids, async (id) => {
+    if (action === 'add') {
+      await pg.query(
+        `INSERT INTO crm_conversation_tags (conversation_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [id, tagId]
+      );
+    } else {
+      await pg.query(`DELETE FROM crm_conversation_tags WHERE conversation_id = $1 AND tag_id = $2`, [id, tagId]);
+    }
+  });
+  res.json({ success: true, ...r });
+});
+
 module.exports = router;

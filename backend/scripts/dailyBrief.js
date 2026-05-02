@@ -12,7 +12,7 @@ async function run() {
   const enabled = await settings.getSetting('daily_brief_enabled', true);
   if (enabled === false) { logger.info('[brief] disabled'); await pg.end(); return; }
 
-  const [overall, handovers, csat, cost, topReasons, conv, pipelineByStage, lostReasons] = await Promise.all([
+  const [overall, handovers, csat, cost, topReasons, conv, pipelineByStage, lostReasons, tasksStats] = await Promise.all([
     pg.query(`
       SELECT
         COUNT(*) FILTER (WHERE direction='in') AS inbound,
@@ -51,6 +51,12 @@ async function run() {
       SELECT lost_reason, COUNT(*)::int AS n FROM crm_conversations
       WHERE pipeline_stage = 'lost' AND pipeline_stage_at > now() - interval '24 hours' AND lost_reason IS NOT NULL
       GROUP BY lost_reason ORDER BY n DESC LIMIT 3`),
+    pg.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status='open')::int AS open_n,
+        COUNT(*) FILTER (WHERE status IN ('open','in_progress') AND due_at <= now() + interval '12 hours' AND due_at >= now())::int AS due_n,
+        COUNT(*) FILTER (WHERE status IN ('open','in_progress') AND due_at < now() - interval '24 hours')::int AS overdue_n
+      FROM crm_tasks`),
   ]);
 
   const o = overall.rows[0];
@@ -93,6 +99,9 @@ ${pipelineLines}
 
 😞 <b>Top Lost reason 24h</b>
 ${lostLines}
+
+📋 <b>Tasks</b>
+• Open: ${tasksStats.rows[0].open_n} · Due 12h: ${tasksStats.rows[0].due_n} · Overdue: ${tasksStats.rows[0].overdue_n}
 
 ${PUBLIC_URL}/ai-monitor`;
 

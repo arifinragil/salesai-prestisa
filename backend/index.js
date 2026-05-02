@@ -18,6 +18,9 @@ const operatorToolsRoutes = require('./routes/operatorTools');
 const usersRoutes = require('./routes/users');
 const funnelRoutes = require('./routes/funnel');
 const pipelineRoutes = require('./routes/pipeline');
+const tasksRoutes = require('./routes/tasks');
+const notificationsRoutes = require('./routes/notifications');
+const savedViewsRoutes = require('./routes/savedViews');
 const healthRoutes = require('./routes/health');
 
 const aiAgent = require('./services/aiAgent');
@@ -55,6 +58,9 @@ app.use('/api/ops', operatorToolsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/funnel', funnelRoutes);
 app.use('/api/pipeline', pipelineRoutes);
+app.use('/api/tasks', tasksRoutes);
+app.use('/api/users/me/notifications', notificationsRoutes);
+app.use('/api/saved-views', savedViewsRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 
