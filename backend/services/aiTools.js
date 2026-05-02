@@ -202,6 +202,37 @@ const declarations = [
 
 // ── Executors ────────────────────────────────────────────────────────────────
 
+// Normalisasi vocabulary Indonesian ↔ English untuk match category DB.
+// Customer pakai bahasa sehari-hari, DB pakai term taxonomy aslinya.
+const CATEGORY_SYNONYMS = {
+  'sukacita': 'congratulations',
+  'suka cita': 'congratulations',
+  'selamat': 'congratulations',
+  'duka': 'dukacita',
+  'duka cita': 'dukacita',
+  'belasungkawa': 'dukacita',
+  'pernikahan': 'wedding',
+  'nikah': 'wedding',
+  'menikah': 'wedding',
+  'kue': 'cake',
+  'tart': 'cake',
+  'mawar': 'rose',
+  'rangkaian': 'bouquet',
+  'buket': 'bouquet',
+  'hampers': 'parsel',
+  'paket': 'parsel',
+};
+
+function normalizeCategoryTokens(category) {
+  let s = String(category || '').toLowerCase().trim();
+  // longest-first replacement
+  const keys = Object.keys(CATEGORY_SYNONYMS).sort((a, b) => b.length - a.length);
+  for (const k of keys) {
+    if (s.includes(k)) s = s.replace(new RegExp(k, 'g'), CATEGORY_SYNONYMS[k]);
+  }
+  return s.split(/\s+/).filter(Boolean);
+}
+
 async function search_products({ args }) {
   const limit = clampInt(args.limit, 5, 10);
 
@@ -210,7 +241,8 @@ async function search_products({ args }) {
     const params = [];
     if (args.category) {
       // category bisa multi-token (mis. "papan duka cita") — split + AND-LIKE
-      const tokens = String(args.category).toLowerCase().split(/\s+/).filter(Boolean);
+      // Plus normalisasi: "papan sukacita" → ["papan", "congratulations"]
+      const tokens = normalizeCategoryTokens(args.category);
       for (const tok of tokens) {
         params.push(`%${tok}%`, `%${tok}%`);
         where.push(`(LOWER(c.name) LIKE ? OR LOWER(p.name) LIKE ?)`);
