@@ -177,48 +177,60 @@ git commit -m "feat(db): migration 015 — copilot mode, suggestion log, scoring
 -- 016_seed_copilot_cases.sql — starter case library for copilot mode
 BEGIN;
 
-INSERT INTO crm_reply_templates (slug, body, active, case_label, case_pattern, intent_match) VALUES
+INSERT INTO crm_reply_templates (shortcut, title, body, enabled, category, case_label, case_pattern, intent_match) VALUES
 ('greeting_default',
+ 'Greeting awal',
  'Halo Kak 🌷 terima kasih sudah chat Prestisa. Ada yang bisa Tiara bantu? Mau cari bunga papan, bouquet, parsel, atau cake?',
- TRUE, 'Greeting awal', '\b(halo|hai|hi|assalam|pagi|siang|sore|malam)\b', 'greeting'),
+ TRUE, 'copilot', 'Greeting awal', '\b(halo|hai|hi|assalam|pagi|siang|sore|malam)\b', 'greeting'),
 
 ('ask_clarify',
+ 'Minta detail order',
  'Boleh Kak share detailnya: untuk siapa, kapan dikirim, dan ke kota mana ya? Biar Tiara bisa siapkan rekomendasi yang pas 🙏',
- TRUE, 'Minta detail order', '\b(mau|cari|butuh|order|pesan)\b', 'product_info'),
+ TRUE, 'copilot', 'Minta detail order', '\b(mau|cari|butuh|order|pesan)\b', 'product_info'),
 
 ('escalate_default',
+ 'Escalate fallback',
  'Sebentar ya Kak, Tiara hubungkan dengan tim spesialis untuk pastikan info lebih detail 🙏',
- TRUE, 'Escalate fallback', NULL, NULL),
+ TRUE, 'copilot', 'Escalate fallback', NULL, NULL),
 
 ('pricing_general',
+ 'Tanya harga umum',
  'Range harga kami Kak: bunga papan mulai Rp 350rb, bouquet mulai Rp 150rb, parsel mulai Rp 250rb, cake mulai Rp 200rb. Boleh Tiara kirimkan pilihan sesuai budget Kakak?',
- TRUE, 'Tanya harga umum', '\b(harga|berapa|murah|budget|anggaran)\b', 'pricing'),
+ TRUE, 'copilot', 'Tanya harga umum', '\b(harga|berapa|murah|budget|anggaran)\b', 'pricing'),
 
 ('shipping_jabodetabek',
+ 'Tanya ongkir',
  'Untuk area Jabodetabek free ongkir Kak ✨ luar Jabodetabek mulai Rp 50rb tergantung kota. Mau kirim ke kota mana?',
- TRUE, 'Tanya ongkir', '\b(ongkir|ongkos|kirim|delivery|pengiriman)\b', 'shipping'),
+ TRUE, 'copilot', 'Tanya ongkir', '\b(ongkir|ongkos|kirim|delivery|pengiriman)\b', 'shipping'),
 
 ('order_status_check',
+ 'Cek status order',
  'Boleh Tiara bantu cek Kak. Mohon share nomor order atau nomor HP yang dipakai saat order ya 🙏',
- TRUE, 'Cek status order', '\b(status|order|pesanan|sudah sampai|kapan sampai|tracking)\b', 'order_status'),
+ TRUE, 'copilot', 'Cek status order', '\b(status|order|pesanan|sudah sampai|kapan sampai|tracking)\b', 'order_status'),
 
 ('closing_cta',
+ 'Closing CTA',
  'Mau Tiara siapkan link order dengan pilihan tadi Kak? Tinggal isi alamat & jadwal kirim, langsung diproses tim kami ✅',
- TRUE, 'Closing CTA', NULL, 'order_intent'),
+ TRUE, 'copilot', 'Closing CTA', NULL, 'order_intent'),
 
 ('payment_info',
+ 'Info pembayaran',
  'Setelah submit order, sistem otomatis kasih nomor VA / rekening transfer ya Kak. Pembayaran terkonfirmasi → langsung diproses ✨',
- TRUE, 'Info pembayaran', '\b(bayar|payment|transfer|rekening|VA|virtual account)\b', 'payment'),
+ TRUE, 'copilot', 'Info pembayaran', '\b(bayar|payment|transfer|rekening|VA|virtual account)\b', 'payment'),
 
 ('lead_time_default',
+ 'Lead time produksi',
  'Untuk pengerjaan butuh sekitar 3-6 jam Kak setelah pembayaran terkonfirmasi. Untuk hari spesial seperti besok pagi, sebaiknya order H-1 ya 🙏',
- TRUE, 'Lead time produksi', '\b(jam|kapan jadi|berapa lama|lama proses)\b', 'shipping'),
+ TRUE, 'copilot', 'Lead time produksi', '\b(jam|kapan jadi|berapa lama|lama proses)\b', 'shipping'),
 
 ('out_of_area_polite',
+ 'Area di luar coverage',
  'Maaf Kak, untuk area itu Tiara cek dulu ketersediaan kurirnya ya. Sebentar 🙏',
- TRUE, 'Area di luar coverage', NULL, 'shipping')
+ TRUE, 'copilot', 'Area di luar coverage', NULL, 'shipping')
 
-ON CONFLICT (slug) DO UPDATE SET
+ON CONFLICT (shortcut) DO UPDATE SET
+  title = EXCLUDED.title,
+  body = EXCLUDED.body,
   case_label = EXCLUDED.case_label,
   case_pattern = EXCLUDED.case_pattern,
   intent_match = EXCLUDED.intent_match;
@@ -238,7 +250,7 @@ Expected: `BEGIN ... INSERT 0 10 ... COMMIT`
 
 ```bash
 psql "postgresql://vonage_sync@localhost:5432/vonage_reports" -c \
-  "SELECT slug, case_label, intent_match FROM crm_reply_templates WHERE case_label IS NOT NULL ORDER BY id;"
+  "SELECT shortcut, case_label, intent_match FROM crm_reply_templates WHERE case_label IS NOT NULL ORDER BY id;"
 ```
 
 Expected: 10 rows printed.
@@ -265,13 +277,13 @@ git commit -m "feat(db): seed 10 starter case-library templates for copilot"
 // padded with fallback if fewer matches found.
 const pg = require('../db/postgres');
 
-const FALLBACK_SLUGS = ['greeting_default', 'ask_clarify', 'escalate_default'];
+const FALLBACK_SHORTCUTS = ['greeting_default', 'ask_clarify', 'escalate_default'];
 
 async function lookup({ inboundBody, intent }) {
   const body = String(inboundBody || '').slice(0, 2000);
   const intentLabel = intent || null;
   const r = await pg.query(
-    `SELECT id, slug, body, case_label, intent_match,
+    `SELECT id, shortcut, body, case_label, intent_match,
        (
          CASE WHEN intent_match = $1 THEN 50 ELSE 0 END +
          CASE WHEN $1 IS NOT NULL AND case_pattern IS NOT NULL AND $2 ~* case_pattern THEN 30
@@ -280,7 +292,7 @@ async function lookup({ inboundBody, intent }) {
          GREATEST(0, 20 - EXTRACT(EPOCH FROM (now() - updated_at))::int / 86400 / 30)
        ) AS relevance
      FROM crm_reply_templates
-     WHERE active = TRUE AND case_label IS NOT NULL
+     WHERE enabled = TRUE AND case_label IS NOT NULL
      ORDER BY relevance DESC, id ASC
      LIMIT 6`,
     [intentLabel, body]
@@ -288,19 +300,19 @@ async function lookup({ inboundBody, intent }) {
   const ranked = r.rows.filter((row) => Number(row.relevance) >= 30).slice(0, 3);
   if (ranked.length >= 3) return { items: ranked, lowConfidence: false };
 
-  // Pad with fallbacks (skip duplicates by slug)
-  const used = new Set(ranked.map((x) => x.slug));
+  // Pad with fallbacks (skip duplicates by shortcut)
+  const used = new Set(ranked.map((x) => x.shortcut));
   const fb = await pg.query(
-    `SELECT id, slug, body, case_label, intent_match
+    `SELECT id, shortcut, body, case_label, intent_match
      FROM crm_reply_templates
-     WHERE slug = ANY($1) AND active = TRUE`,
-    [FALLBACK_SLUGS]
+     WHERE shortcut = ANY($1) AND enabled = TRUE`,
+    [FALLBACK_SHORTCUTS]
   );
   for (const f of fb.rows) {
     if (ranked.length >= 3) break;
-    if (!used.has(f.slug)) {
+    if (!used.has(f.shortcut)) {
       ranked.push({ ...f, relevance: 0 });
-      used.add(f.slug);
+      used.add(f.shortcut);
     }
   }
   return { items: ranked.slice(0, 3), lowConfidence: true };
@@ -317,9 +329,9 @@ require('dotenv').config({ path: '.env' });
 (async () => {
   const lib = require('./backend/services/caseLibrary');
   const a = await lib.lookup({ inboundBody: 'berapa harga bouquet?', intent: 'pricing' });
-  console.log('PRICING:', a.lowConfidence, a.items.map(x => x.slug));
+  console.log('PRICING:', a.lowConfidence, a.items.map(x => x.shortcut));
   const b = await lib.lookup({ inboundBody: 'asdf qwerty zzz', intent: null });
-  console.log('NONSENSE:', b.lowConfidence, b.items.map(x => x.slug));
+  console.log('NONSENSE:', b.lowConfidence, b.items.map(x => x.shortcut));
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
 "
@@ -436,7 +448,7 @@ async function generate(opts) {
     rank: i + 1,
     source: 'case',
     template_id: c.id,
-    template_slug: c.slug,
+    template_shortcut: c.shortcut,
     case_label: c.case_label,
     text: c.body,
     confidence: lowConfidence ? 'low' : 'normal',
