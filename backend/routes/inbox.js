@@ -912,6 +912,24 @@ router.post('/handovers/:id/resolve', async (req, res) => {
     `UPDATE crm_handovers SET resolved_at = now(), resolved_by = $2 WHERE id = $1`,
     [id, req.staff.staff_id]
   );
+  // Pipeline: refund/cancel handover resolved → lost
+  try {
+    const ho = await pg.query(`SELECT conversation_id, reason FROM crm_handovers WHERE id = $1`, [id]);
+    const reason = ho.rows[0]?.reason;
+    const convId = ho.rows[0]?.conversation_id;
+    if (convId && (reason === 'refund' || reason === 'cancel')) {
+      const engine = require('../services/pipelineEngine');
+      await engine.apply(pg, convId, {
+        type: reason === 'refund' ? 'handover_refund' : 'handover_cancel',
+      }, {
+        source: 'auto:handover_resolved',
+        staffId: req.staff.staff_id,
+        lostReason: reason === 'refund' ? 'refund_complaint' : 'cancelled',
+      });
+    }
+  } catch (err) {
+    console.warn('[pipeline] handover resolve hook failed:', err.message);
+  }
   res.json({ success: true });
 });
 

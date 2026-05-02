@@ -65,6 +65,30 @@ router.post('/conversations/:id/tags', async (req, res) => {
       );
     }
     await pg.query('COMMIT');
+
+    // Pipeline: tag-driven side effects
+    try {
+      const engine = require('../services/pipelineEngine');
+      const mapped = await pg.query(
+        `SELECT t.maps_to_pipeline_type FROM crm_tags t
+         JOIN crm_conversation_tags ct ON ct.tag_id = t.id
+         WHERE ct.conversation_id = $1 AND t.maps_to_pipeline_type IS NOT NULL
+         ORDER BY t.id LIMIT 1`,
+        [id]
+      );
+      if (mapped.rows[0]?.maps_to_pipeline_type) {
+        await engine.setType(pg, id, mapped.rows[0].maps_to_pipeline_type);
+      }
+      const flagged = await pg.query(
+        `SELECT 1 FROM crm_tags t JOIN crm_conversation_tags ct ON ct.tag_id = t.id
+         WHERE ct.conversation_id = $1 AND LOWER(t.name) ~ 'vip|loyal|korporat'
+         LIMIT 1`, [id]
+      );
+      if (flagged.rows.length) {
+        await pg.query(`UPDATE crm_conversations SET manual_stage_override = TRUE WHERE id = $1`, [id]);
+      }
+    } catch (err) { console.warn('[pipeline] tag hook failed:', err.message); }
+
     res.json({ success: true, tag_ids: tagIds });
   } catch (err) {
     await pg.query('ROLLBACK');

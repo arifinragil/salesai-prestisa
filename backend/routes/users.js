@@ -115,6 +115,13 @@ router.post('/conversations/:id/claim', async (req, res) => {
            released_at = NULL`,
     [convId, req.staff.staff_id, String(leaseMin)]
   );
+  // Pipeline: operator_claim event
+  try {
+    const engine = require('../services/pipelineEngine');
+    await engine.apply(pg, convId, { type: 'operator_claim' }, {
+      source: 'auto:operator_claim', staffId: req.staff.staff_id,
+    });
+  } catch (err) { console.warn('[pipeline] claim hook failed:', err.message); }
   res.json({ success: true, lease_minutes: leaseMin });
 });
 
