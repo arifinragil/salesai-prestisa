@@ -65,7 +65,8 @@ export default function SupervisorAgent() {
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Score history (last {scores.length} days)</h2>
           {scores.length === 0
             ? <div className="text-sm text-slate-400">Belum ada data score</div>
-            : <table className="w-full text-xs">
+            : <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[560px]">
                 <thead className="text-slate-500 uppercase">
                   <tr>
                     <th className="text-left py-1">Date</th>
@@ -95,7 +96,8 @@ export default function SupervisorAgent() {
                     );
                   })}
                 </tbody>
-              </table>}
+              </table>
+              </div>}
         </div>
 
         <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -150,7 +152,8 @@ export default function SupervisorAgent() {
         {sug.length > 0 && (
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <h2 className="text-sm font-semibold text-slate-700 mb-2">Suggestion usage</h2>
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[400px]">
               <thead className="text-slate-500 uppercase">
                 <tr>
                   <th className="text-left py-1">Day</th>
@@ -172,6 +175,7 @@ export default function SupervisorAgent() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
