@@ -327,11 +327,12 @@ router.get('/kb-drafts', async (req, res) => {
   const status = req.query.status || 'pending';
   const { rows } = await pg.query(
     `SELECT d.id, d.conversation_id, d.message_id, d.question, d.suggested_answer,
-            d.status, d.created_at, d.reviewed_at, d.reviewed_by, c.phone
+            d.status, d.created_at, d.reviewed_at, d.reviewed_by, c.phone,
+            d.frequency, d.cluster_id, d.auto_drafted_at
      FROM crm_kb_drafts d
      LEFT JOIN crm_conversations c ON c.id = d.conversation_id
      WHERE d.status = $1
-     ORDER BY d.created_at DESC LIMIT 100`,
+     ORDER BY d.frequency DESC NULLS LAST, d.created_at DESC LIMIT 100`,
     [status]
   );
   res.json({ success: true, items: rows });

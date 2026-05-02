@@ -138,12 +138,24 @@ export default function KnowledgePage() {
 function DraftRow({ draft, onApprove, onDismiss }) {
   const [open, setOpen] = useState(false);
   const [topic, setTopic] = useState('');
-  const [answer, setAnswer] = useState('');
+  const [answer, setAnswer] = useState(draft.suggested_answer || '');
   return (
     <li className="bg-white border border-amber-200 rounded p-3 text-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="text-slate-800">{draft.question}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-slate-800">{draft.question}</span>
+            {draft.frequency > 1 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 font-medium">
+                {draft.frequency}× ditanya
+              </span>
+            )}
+            {draft.suggested_answer && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                ✨ AI draft
+              </span>
+            )}
+          </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
             conv #{draft.conversation_id} · {new Date(draft.created_at).toLocaleString('id-ID')}
           </div>
