@@ -45,6 +45,59 @@ function ModelPicker({ provider, value, placeholder, models, loading, onLoad, on
   );
 }
 
+function ModeToggleCard({ getSetting, saveSetting }) {
+  const current = getSetting('ai_mode', 'auto');
+  const [mode, setMode] = useState(current);
+  useEffect(() => { setMode(current); }, [current]);
+
+  async function apply() {
+    if (mode === current) return;
+    if (mode === 'copilot' &&
+        !confirm('Pindah ke Co-Pilot: AI berhenti auto-reply semua conversation aktif.\nOperator wajib handle setiap pesan masuk.\n\nLanjutkan?')) {
+      setMode(current);
+      return;
+    }
+    await saveSetting('ai_mode', mode);
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-5">
+      <h2 className="text-sm font-semibold text-slate-700 mb-3">Mode AI</h2>
+      <div className="space-y-2">
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input type="radio" name="ai_mode_radio" value="auto"
+            checked={mode === 'auto'}
+            onChange={(e) => setMode(e.target.value)}
+            className="mt-1" />
+          <div>
+            <div className="font-medium text-slate-800">Auto</div>
+            <div className="text-xs text-slate-500">AI auto-reply ke customer (default).</div>
+          </div>
+        </label>
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input type="radio" name="ai_mode_radio" value="copilot"
+            checked={mode === 'copilot'}
+            onChange={(e) => setMode(e.target.value)}
+            className="mt-1" />
+          <div>
+            <div className="font-medium text-slate-800">Co-Pilot</div>
+            <div className="text-xs text-slate-500">AI generate suggestion, operator yang reply.</div>
+          </div>
+        </label>
+      </div>
+      <button onClick={apply} disabled={mode === current}
+        className="mt-3 text-sm px-3 py-1.5 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:bg-slate-300">
+        Apply
+      </button>
+      {mode === 'copilot' && current !== 'copilot' && (
+        <div className="text-xs text-amber-700 mt-2">
+          ⚠ Setelah Apply: customer langsung idle kalau operator nggak available.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AiSettings() {
   const toast = useToast();
   const personas = useSWR('/api/admin/personas', fetcher);
@@ -212,6 +265,8 @@ export default function AiSettings() {
     <Layout title="Persona & Settings — Tiara">
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-6">
         <h1 className="text-lg font-semibold text-slate-800">Persona & Settings</h1>
+
+        <ModeToggleCard getSetting={getSetting} saveSetting={saveSetting} />
 
         <OpsSettingsCard
           getSetting={getSetting}
