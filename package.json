@@ -1,0 +1,18 @@
+{
+  "name": "crm",
+  "version": "1.0.0",
+  "description": "Customer-facing WhatsApp sales AI agent for Prestisa. Pilot project.",
+  "main": "ecosystem.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright-core": "^1.59.1"
+  }
+}

@@ -17,13 +17,17 @@ export default function PipelineCard({ conv, onClick, draggable, onDragStart }) 
   const phone = formatPhone(phoneRaw);
   const display = formatDisplayName(conv.push_name, phoneRaw);
   const isSamePhone = display === phone;
+  const tempBorder =
+    conv.lead_temperature === 'hot'  ? 'border-l-4 border-l-rose-400' :
+    conv.lead_temperature === 'warm' ? 'border-l-4 border-l-amber-400' :
+    '';
   return (
     <div
       role="button"
       onClick={onClick}
       draggable={draggable}
       onDragStart={onDragStart}
-      className="bg-white border border-slate-200 rounded-md p-2 text-xs cursor-pointer hover:border-brand-300 hover:shadow-sm transition select-none"
+      className={`bg-white border border-slate-200 rounded-md p-2 text-xs cursor-pointer hover:border-brand-300 hover:shadow-sm transition select-none ${tempBorder}`}
       title={`#${conv.id} · ${phone}`}
     >
       <div className="flex items-start justify-between gap-1">
