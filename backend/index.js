@@ -23,6 +23,7 @@ const notificationsRoutes = require('./routes/notifications');
 const savedViewsRoutes = require('./routes/savedViews');
 const healthRoutes = require('./routes/health');
 const suggestionsRoutes = require('./routes/suggestions');
+const supervisorRoutes = require('./routes/supervisor');
 
 const aiAgent = require('./services/aiAgent');
 
@@ -63,6 +64,7 @@ app.use('/api/pipeline', pipelineRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/users/me/notifications', notificationsRoutes);
 app.use('/api/saved-views', savedViewsRoutes);
+app.use('/api/supervisor', supervisorRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 

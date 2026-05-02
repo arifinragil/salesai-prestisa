@@ -232,6 +232,12 @@ router.post('/conversations/:id/send', async (req, res) => {
     [id, req.staff.staff_id, body, sent.id || null]
   );
   await pg.query(`UPDATE crm_conversations SET last_message_at = now(), updated_at = now() WHERE id = $1`, [id]);
+  // Set first_response_at on the first operator outbound after an inbound (idempotent).
+  await pg.query(
+    `UPDATE crm_conversations SET first_response_at = COALESCE(first_response_at, now())
+     WHERE id = $1 AND first_inbound_at IS NOT NULL`,
+    [id]
+  );
 
   notify.notifyMessage({
     conversation_id: id,
