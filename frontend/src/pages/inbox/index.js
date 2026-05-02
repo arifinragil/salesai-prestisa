@@ -6,7 +6,7 @@ import Layout from '@/components/Layout';
 import { fetcher } from '@/lib/api';
 import { useSocket } from '@/lib/useSocket';
 import { useNotifPermission, useNotificationSound, showBrowserNotification } from '@/lib/useNotifications';
-import { formatRelative, truncate, convStatusLabel, formatPhone } from '@/lib/format';
+import { formatRelative, truncate, convStatusLabel, formatPhone, formatDisplayName, isLidPhone } from '@/lib/format';
 import PipelineStageBadge from '@/components/PipelineStageBadge';
 
 const TAG_COLOR = {
@@ -291,10 +291,21 @@ export default function InboxList() {
                           <span className="font-medium text-sm text-slate-800">
                             {formatPhone(conv.real_phone || conv.phone)}
                           </span>
-                          {conv.push_name && (
-                            <span className="text-xs text-slate-500 truncate max-w-[120px]" title={conv.push_name}>
-                              {conv.push_name}
-                            </span>
+                          {(() => {
+                            const display = formatDisplayName(conv.push_name, conv.real_phone || conv.phone);
+                            const formattedPhone = formatPhone(conv.real_phone || conv.phone);
+                            if (!display || display === formattedPhone) return null;
+                            return (
+                              <span className="text-xs text-slate-500 truncate max-w-[120px]" title={conv.push_name}>
+                                {display}
+                              </span>
+                            );
+                          })()}
+                          {isLidPhone(conv.phone) && !conv.real_phone && (
+                            <span
+                              className="text-[10px] text-amber-700 bg-amber-50 px-1 rounded border border-amber-200"
+                              title="LID — buka chat untuk set No. asli di sidebar"
+                            >set No.</span>
                           )}
                           <span className={`status-pill ${status.cls}`}>
                             {status.label}

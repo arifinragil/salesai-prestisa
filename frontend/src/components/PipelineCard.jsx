@@ -1,4 +1,4 @@
-import { formatRelative } from '@/lib/format';
+import { formatRelative, formatPhone, formatDisplayName } from '@/lib/format';
 
 const TYPE_ICON = {
   papan: '🪦',
@@ -13,8 +13,10 @@ const TYPE_ICON = {
 const HEALTH_ICON = { vip: '⭐', warm: '🔥', cold: '❄', at_risk: '⚠', new: '' };
 
 export default function PipelineCard({ conv, onClick, draggable, onDragStart }) {
-  const phone = conv.real_phone || conv.phone;
-  const display = conv.push_name || phone;
+  const phoneRaw = conv.real_phone || conv.phone;
+  const phone = formatPhone(phoneRaw);
+  const display = formatDisplayName(conv.push_name, phoneRaw);
+  const isSamePhone = display === phone;
   return (
     <div
       role="button"
@@ -28,7 +30,7 @@ export default function PipelineCard({ conv, onClick, draggable, onDragStart }) 
         <div className="font-medium text-slate-800 truncate">{display}</div>
         {HEALTH_ICON[conv.health_band] && <span aria-hidden>{HEALTH_ICON[conv.health_band]}</span>}
       </div>
-      <div className="text-[10px] text-slate-500 truncate mt-0.5">{phone}</div>
+      {!isSamePhone && <div className="text-[10px] text-slate-500 truncate mt-0.5">{phone}</div>}
       <div className="flex items-center gap-1 mt-1 text-[11px]">
         <span aria-hidden>{TYPE_ICON[conv.pipeline_type] || TYPE_ICON.unknown}</span>
         <span className="text-slate-600">{conv.pipeline_type}</span>

@@ -29,10 +29,10 @@ export function formatTimestamp(ts) {
 export function formatPhone(phone) {
   if (!phone) return '—';
   const s = String(phone);
-  // WhatsApp Linked Identifier — opaque internal ID, not a real phone
+  // WhatsApp Linked Identifier — opaque internal ID, customer pakai privacy mode.
+  // Bukan phone number, jadi tidak bisa di-format. Kasih label jelas.
   if (s.endsWith('@lid')) {
-    const head = s.split('@')[0];
-    return `LID:${head.slice(-6)}`;
+    return '🔒 No. privasi';
   }
   // Strip any other JID suffix (@c.us, @s.whatsapp.net)
   const head = s.split('@')[0].replace(/\D/g, '');
@@ -46,6 +46,23 @@ export function formatPhone(phone) {
     return `+62 ${part1}-${part2}${part3 ? '-' + part3 : ''}`;
   }
   return head;
+}
+
+// Helper: detect @lid (privacy mode) — used to show "set No. asli" hint
+export function isLidPhone(phone) {
+  return !!phone && String(phone).endsWith('@lid');
+}
+
+// Display name with sensible fallback. Hide redundant push_name kalau
+// == raw LID digits.
+export function formatDisplayName(pushName, phone) {
+  if (!pushName) return formatPhone(phone);
+  // If push_name is just raw digits matching LID head, hide it
+  if (isLidPhone(phone)) {
+    const lidHead = String(phone).split('@')[0];
+    if (pushName === lidHead) return '🔒 No. privasi';
+  }
+  return pushName;
 }
 
 export function truncate(s, n = 60) {
