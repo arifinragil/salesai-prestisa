@@ -416,6 +416,19 @@ async function build_order_form_url({ args, phone, conv }) {
         ]
       );
     } catch (err) { /* non-fatal */ }
+
+    // Pipeline: order_url_sent → form_dikirim, set type
+    try {
+      const engine = require('./pipelineEngine');
+      const pg = require('../db/postgres');
+      const typeMap = { papan: 'papan', bouquet: 'bouquet', parsel: 'parsel', cake: 'cake' };
+      const mapped = typeMap[type];
+      if (mapped) await engine.setType(pg, conv.id, mapped);
+      await engine.apply(pg, conv.id, { type: 'order_url_sent' }, {
+        source: 'auto:order_url_sent',
+        metadata: { product_type: type, ref: utmRef },
+      });
+    } catch (err) { /* non-fatal */ }
   }
 
   return { url: `${base}?${params.toString()}`, utm_ref: utmRef };

@@ -41,6 +41,7 @@ export default function AiMonitor() {
   const conversion = useSWR('/api/admin/conversion/attribution?days=30', fetcher, { refreshInterval: 5 * 60_000 });
   const opPerf = useSWR('/api/admin/operator-performance?days=30', fetcher, { refreshInterval: 5 * 60_000 });
   const cohort = useSWR('/api/admin/cohort-retention?days=90', fetcher, { refreshInterval: 60 * 60_000 });
+  const pipelineSummary = useSWR('/api/pipeline/forecast?days=30', fetcher, { refreshInterval: 5 * 60_000 });
 
   useSocket(
     {
@@ -604,6 +605,38 @@ export default function AiMonitor() {
               </div>
             ) : <div className="text-sm text-slate-400">Belum ada data — perlu &gt;30 hari history.</div>}
           </div>
+        </div>
+
+        {/* Pipeline summary */}
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-slate-700">Pipeline summary 30d</h2>
+            <Link href="/pipeline" className="text-xs text-brand-600 hover:underline">Buka kanban →</Link>
+          </div>
+          {pipelineSummary.data ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="rounded bg-brand-50 border border-brand-200 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Expected revenue</div>
+                <div className="text-lg font-semibold text-brand-800">Rp {Number(pipelineSummary.data.expected_revenue || 0).toLocaleString('id-ID')}</div>
+              </div>
+              <div className="rounded bg-emerald-50 border border-emerald-200 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Realized 30d</div>
+                <div className="text-lg font-semibold text-emerald-800">Rp {Number(pipelineSummary.data.realized_revenue_30d || 0).toLocaleString('id-ID')}</div>
+              </div>
+              <div className="rounded bg-slate-50 border border-slate-200 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Active deals</div>
+                <div className="text-lg font-semibold text-slate-800">{pipelineSummary.data.deal_count || 0}</div>
+              </div>
+              <div className="md:col-span-3 grid grid-cols-3 sm:grid-cols-7 gap-1">
+                {Object.entries(pipelineSummary.data.by_stage || {}).map(([stage, d]) => (
+                  <div key={stage} className="rounded bg-slate-50 border border-slate-200 px-2 py-1.5 text-center">
+                    <div className="text-[10px] text-slate-500">{stage}</div>
+                    <div className="text-sm font-semibold text-slate-800">{d.count}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : <div className="text-sm text-slate-400">Loading…</div>}
         </div>
 
         {/* Recent days metrics */}

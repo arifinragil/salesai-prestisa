@@ -5,6 +5,7 @@ import SimpleTable from '@/components/SimpleTable';
 import { api, fetcher } from '@/lib/api';
 
 const PALETTE = ['slate','rose','amber','emerald','sky','indigo','violet','pink'];
+const TYPES = ['', 'papan', 'bouquet', 'parsel', 'cake', 'wedding', 'b2b'];
 
 const TAG_COLOR = {
   slate:    'bg-slate-100 text-slate-700 border-slate-200',
@@ -19,7 +20,7 @@ const TAG_COLOR = {
 
 export default function TagsPage() {
   const { data, mutate } = useSWR('/api/ops/tags', fetcher);
-  const [draft, setDraft] = useState({ name: '', color: 'slate', description: '' });
+  const [draft, setDraft] = useState({ name: '', color: 'slate', description: '', maps_to_pipeline_type: '' });
   const [error, setError] = useState(null);
 
   async function add(e) {
@@ -27,13 +28,19 @@ export default function TagsPage() {
     setError(null);
     try {
       await api('/api/ops/tags', { method: 'POST', body: draft });
-      setDraft({ name: '', color: 'slate', description: '' });
+      setDraft({ name: '', color: 'slate', description: '', maps_to_pipeline_type: '' });
       mutate();
     } catch (err) { setError(err.message); }
   }
   async function remove(id) {
     if (!confirm('Hapus tag ini?')) return;
     try { await api(`/api/ops/tags/${id}`, { method: 'DELETE' }); mutate(); } catch (err) { alert(err.message); }
+  }
+  async function setMapping(id, val) {
+    try {
+      await api(`/api/ops/tags/${id}`, { method: 'PUT', body: { maps_to_pipeline_type: val || '' } });
+      mutate();
+    } catch (err) { alert(err.message); }
   }
 
   const items = data?.items || [];
@@ -61,12 +68,22 @@ export default function TagsPage() {
               + Tambah tag
             </button>
           </div>
-          <input
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            placeholder="Deskripsi singkat (opsional)"
-            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input
+              value={draft.description}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              placeholder="Deskripsi singkat (opsional)"
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm"
+            />
+            <select
+              value={draft.maps_to_pipeline_type}
+              onChange={(e) => setDraft({ ...draft, maps_to_pipeline_type: e.target.value })}
+              className="border border-slate-300 rounded-md px-3 py-2 text-sm"
+              title="Maps to deal type — tag attached → set pipeline_type otomatis"
+            >
+              {TYPES.map((t) => <option key={t} value={t}>{t || 'Maps to deal type… (none)'}</option>)}
+            </select>
+          </div>
           {error && <p className="text-sm text-rose-600">{error}</p>}
         </form>
 
@@ -78,6 +95,15 @@ export default function TagsPage() {
               </span>
             )},
             { key: 'description', label: 'Deskripsi', render: (r) => r.description || <span className="text-slate-300">—</span> },
+            { key: 'maps_to_pipeline_type', label: 'Deal type', render: (r) => (
+              <select
+                value={r.maps_to_pipeline_type || ''}
+                onChange={(e) => setMapping(r.id, e.target.value)}
+                className="text-xs px-1 py-0.5 border border-slate-200 rounded"
+              >
+                {TYPES.map((t) => <option key={t} value={t}>{t || '—'}</option>)}
+              </select>
+            )},
             { key: 'conv_count', label: 'Conv', cellClass: 'text-right tabular-nums' },
             { key: 'actions', label: '', cellClass: 'text-right',
               render: (r) => (

@@ -64,6 +64,14 @@ async function processPaidConfirm() {
     const body = `🌷 Terima kasih Kak! Pembayaran untuk pesanan #${o.order_number || o.id} sudah kami terima ✅\n\nTim kami akan segera memproses dan kirim sesuai jadwal. Kalau ada perubahan alamat/detail, balas chat ini sebelum proses pengiriman ya 🙏`;
     const r = await sendPush({ orderId: o.id, kind: 'paid_confirm', body, conv });
     if (r.sent) logger.info({ order_id: o.id, kind: 'paid_confirm' }, '[delivery] sent');
+    if (conv) {
+      try {
+        const engine = require('../services/pipelineEngine');
+        await engine.apply(pg, conv.id, { type: 'order_paid' }, {
+          source: 'auto:order_paid', metadata: { order_id: o.id },
+        });
+      } catch (err) { logger.warn({ err: err.message }, '[pipeline] order_paid hook failed'); }
+    }
   }
 }
 
@@ -103,6 +111,14 @@ async function processPostDelivery() {
     const body = `Halo Kak 🌷 semoga rangkaian untuk ${o.receiver_name || 'momen kemarin'} berkesan ya 💐\n\nBoleh kasih rating pengalaman chat & pengiriman? Ketik 1-5:\n1 = sangat tidak puas\n5 = sangat puas\n\nKritik/saran sangat membantu kami berkembang 🙏`;
     const r = await sendPush({ orderId: o.id, kind: 'post_delivery', body, conv });
     if (r.sent) logger.info({ order_id: o.id, kind: 'post_delivery' }, '[delivery] sent');
+    if (conv) {
+      try {
+        const engine = require('../services/pipelineEngine');
+        await engine.apply(pg, conv.id, { type: 'order_delivered' }, {
+          source: 'auto:order_delivered', metadata: { order_id: o.id },
+        });
+      } catch (err) { logger.warn({ err: err.message }, '[pipeline] order_delivered hook failed'); }
+    }
   }
 }
 

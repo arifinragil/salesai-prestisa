@@ -15,6 +15,117 @@ const TAG_COLOR = {
   pink:'bg-pink-100 text-pink-700 border-pink-200',
 };
 
+function PipelineBlock({ conv, onMutate, toast }) {
+  const [showLost, setShowLost] = useState(false);
+  const [lostReason, setLostReason] = useState('no_reply');
+  const [lostNote, setLostNote] = useState('');
+  const [valueDraft, setValueDraft] = useState('');
+
+  if (!conv) return null;
+
+  async function setStage(stage) {
+    try {
+      await api(`/api/pipeline/conversations/${conv.id}/stage`, { method: 'POST', body: { stage } });
+      toast.success(`Stage: ${stage}`);
+      onMutate();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function setType(type) {
+    try {
+      await api(`/api/pipeline/conversations/${conv.id}/type`, { method: 'POST', body: { type } });
+      toast.success(`Type: ${type}`);
+      onMutate();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function markLost() {
+    if (lostReason === 'other_with_note' && !lostNote.trim()) {
+      toast.error('Note wajib untuk other_with_note');
+      return;
+    }
+    try {
+      await api(`/api/pipeline/conversations/${conv.id}/stage`, {
+        method: 'POST',
+        body: { stage: 'lost', lost_reason: lostReason, lost_note: lostNote || null },
+      });
+      toast.success('Marked Lost');
+      setShowLost(false);
+      setLostNote('');
+      onMutate();
+    } catch (e) { toast.error(e.message); }
+  }
+  async function saveValue() {
+    const v = parseInt(valueDraft);
+    if (!v || v < 0) return toast.error('value must be positive number');
+    try {
+      await api(`/api/pipeline/conversations/${conv.id}/value`, { method: 'POST', body: { value_idr: v, lock: true } });
+      toast.success('Deal value saved');
+      setValueDraft('');
+      onMutate();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  const STAGES = ['baru', 'tertarik', 'form_dikirim', 'order_submitted', 'paid', 'delivered'];
+  const TYPES = ['unknown', 'papan', 'bouquet', 'parsel', 'cake', 'wedding', 'b2b'];
+  const LOST_REASONS = ['no_reply', 'harga_terlalu_tinggi', 'kompetitor', 'produk_tidak_cocok', 'timing_tidak_pas', 'cancelled', 'refund_complaint', 'other_with_note'];
+  const isHighValue = ['wedding', 'b2b'].includes(conv.pipeline_type);
+
+  return (
+    <section className="space-y-2">
+      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Pipeline</div>
+      <div className="bg-white rounded-md border border-slate-200 p-3 space-y-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-500">Stage</span>
+          <select value={conv.pipeline_stage || 'baru'} onChange={(e) => setStage(e.target.value)}
+            className="text-xs px-1 py-0.5 border border-slate-200 rounded">
+            {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+            <option value="lost">lost</option>
+          </select>
+        </div>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-500">Type</span>
+          <select value={conv.pipeline_type || 'unknown'} onChange={(e) => setType(e.target.value)}
+            className="text-xs px-1 py-0.5 border border-slate-200 rounded">
+            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-500">Deal value</span>
+          <span className="font-medium text-slate-700">
+            {conv.deal_value_idr ? `Rp ${Number(conv.deal_value_idr).toLocaleString('id-ID')}` : '—'}
+            {conv.deal_value_locked && <span aria-hidden title="locked"> 🔒</span>}
+          </span>
+        </div>
+        {isHighValue && (
+          <div className="flex gap-1">
+            <input value={valueDraft} onChange={(e) => setValueDraft(e.target.value)} placeholder="Manual value (Rp)"
+              className="flex-1 text-xs px-1.5 py-1 border border-slate-200 rounded" type="number" />
+            <button onClick={saveValue} className="text-xs px-2 py-1 rounded bg-brand-500 text-white">Set</button>
+          </div>
+        )}
+        <button onClick={() => setShowLost(!showLost)}
+          className="w-full text-xs px-2 py-1 rounded border border-rose-200 text-rose-700 hover:bg-rose-50">
+          {showLost ? 'Tutup' : 'Mark Lost…'}
+        </button>
+        {showLost && (
+          <div className="space-y-1">
+            <select value={lostReason} onChange={(e) => setLostReason(e.target.value)}
+              className="w-full text-xs px-1.5 py-1 border border-slate-200 rounded">
+              {LOST_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {lostReason === 'other_with_note' && (
+              <textarea value={lostNote} onChange={(e) => setLostNote(e.target.value)} rows={2}
+                placeholder="Note (wajib)" className="w-full text-xs px-1.5 py-1 border border-slate-200 rounded" />
+            )}
+            <button onClick={markLost} className="w-full text-xs px-2 py-1 rounded bg-rose-500 text-white hover:bg-rose-600">
+              Konfirmasi Lost
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function NotesBlock({ convId, toast }) {
   const { data, mutate } = useSWR(convId ? `/api/ops/conversations/${convId}/notes` : null, fetcher);
   const [val, setVal] = useState('');
@@ -394,6 +505,7 @@ export default function CustomerPanel({ convId }) {
                 </div>
               </section>
             )}
+            <PipelineBlock conv={p} onMutate={() => mutate()} toast={toast} />
             {Array.isArray(p.facts) && p.facts.length > 0 && (
               <section>
                 <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Fakta dari chat</div>

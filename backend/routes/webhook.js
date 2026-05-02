@@ -51,10 +51,23 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
          wa_session = COALESCE(EXCLUDED.wa_session, crm_conversations.wa_session),
          push_name = COALESCE(EXCLUDED.push_name, crm_conversations.push_name),
          updated_at = now()
-       RETURNING id, ai_enabled, ai_paused_until, status, shadow_mode, wa_session`,
+       RETURNING id, ai_enabled, ai_paused_until, status, shadow_mode, wa_session, (xmax = 0) AS is_new_conv`,
       [parsed.phone, resolved.customer_id, shadowDefault, session, parsed.pushName || null]
     );
     const conv = convQ.rows[0];
+
+    // Pipeline: bootstrap event for new conv
+    if (conv.is_new_conv) {
+      try {
+        await client.query(
+          `INSERT INTO crm_pipeline_events (conversation_id, from_stage, to_stage, source)
+           VALUES ($1, NULL, 'baru', 'auto:conv_created')`,
+          [conv.id]
+        );
+      } catch (err) {
+        logger.warn({ err: err.message, conv_id: conv.id }, '[pipeline] bootstrap event failed');
+      }
+    }
 
     // Pass through the actual media type (image / video / audio / document / media);
     // fall back to 'text' when no attachment.
@@ -101,6 +114,18 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
            VALUES ($1, $2, 'other', $3)`,
           [conv.id, msg.id, `spam_block: ${r.reason}${r.pattern ? ' ('+r.pattern+')' : ''}`]
         );
+        // Pipeline: spam_blocked → lost
+        try {
+          const engine = require('../services/pipelineEngine');
+          await engine.apply(client, conv.id, { type: 'spam_blocked' }, {
+            source: 'auto:spam_filter',
+            lostReason: 'other_with_note',
+            lostNote: `spam_block: ${r.reason}${r.pattern ? ' ('+r.pattern+')' : ''}`,
+            metadata: { reason: r.reason, pattern: r.pattern },
+          });
+        } catch (err) {
+          logger.warn({ err: err.message }, '[pipeline] spam hook failed');
+        }
       }
     } catch {}
     if (spamSkipped) {

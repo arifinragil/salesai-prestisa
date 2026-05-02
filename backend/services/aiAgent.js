@@ -474,6 +474,20 @@ async function processOne() {
       }
     } catch {}
 
+    // Pipeline: intent_qualified event
+    try {
+      const QUALIFY = new Set(['order_intent', 'pricing', 'shipping', 'payment']);
+      if (cls.confidence >= 0.6 && QUALIFY.has(cls.intent)) {
+        const engine = require('./pipelineEngine');
+        await engine.apply(client, conv.id, { type: 'intent_qualified' }, {
+          source: 'auto:intent_classifier',
+          metadata: { intent: cls.intent, confidence: cls.confidence },
+        });
+      }
+    } catch (err) {
+      logger.warn({ err: err.message, conv_id: conv.id }, '[pipeline] intent hook failed');
+    }
+
     if (gemini.isDangerous(cls.intent)) {
       const hoReason = cls.intent === 'explicit_request_human' ? 'explicit_request_human' : cls.intent;
       const hoId = await recordHandover(client, { convId: conv.id, msgId: msg.id, reason: hoReason, summary: `intent=${cls.intent}` });

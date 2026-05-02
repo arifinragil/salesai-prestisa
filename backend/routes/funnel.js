@@ -24,6 +24,33 @@ router.post('/event', async (req, res) => {
      VALUES ($1, $2, $3, $4, $5)`,
     [convId, refStr, event, req.ip || null, (req.get('user-agent') || '').slice(0, 300)]
   );
+
+  // Pipeline: form_submitted → order_submitted (only for 'submitted' event)
+  if (event === 'submitted' && convId) {
+    try {
+      const engine = require('../services/pipelineEngine');
+      let orderId = null, value = null;
+      try {
+        const mysql = require('../db/mysql');
+        const [orders] = await mysql.query(
+          `SELECT id, total FROM \`order\` WHERE utm_content = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1`,
+          [refStr]
+        );
+        if (orders[0]) {
+          orderId = orders[0].id;
+          value = Number(orders[0].total) || null;
+        }
+      } catch {}
+      if (orderId) await engine.fillFromOrder(pg, convId, orderId, value);
+      await engine.apply(pg, convId, { type: 'order_submitted' }, {
+        source: 'auto:funnel_submitted',
+        metadata: { ref: refStr, order_id: orderId, value },
+      });
+    } catch (err) {
+      console.warn('[pipeline] funnel hook failed:', err.message);
+    }
+  }
+
   res.json({ success: true });
 });
 

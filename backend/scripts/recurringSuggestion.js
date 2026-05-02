@@ -71,6 +71,28 @@ async function run() {
         [conv.conversation_id, body, JSON.stringify({ receiver: h.receiver_name, years_ago: h.years_ago, original_date: h.date_time })]
       );
       scheduled++;
+
+      // Pipeline: infer pipeline_type from this customer's past order_items category
+      try {
+        const [cat] = await mysql.query(
+          `SELECT LOWER(c.name) AS category FROM order_items oi
+           JOIN \`order\` o ON o.id = oi.order_id
+           LEFT JOIN products p ON p.id = oi.product_id
+           LEFT JOIN product_category_new c ON c.id = p.category_id
+           WHERE o.customer_id = ? AND oi.deleted_at IS NULL AND o.deleted_at IS NULL
+             AND oi.receiver_name = ?
+           ORDER BY oi.id DESC LIMIT 1`,
+          [conv.customer_id, h.receiver_name]
+        );
+        const map = { 'papan duka': 'papan', 'papan': 'papan', 'bouquet': 'bouquet', 'parsel': 'parsel', 'cake': 'cake', 'kue': 'cake' };
+        const catName = (cat[0]?.category || '').toLowerCase();
+        let mapped = 'unknown';
+        for (const k of Object.keys(map)) if (catName.includes(k)) { mapped = map[k]; break; }
+        if (mapped !== 'unknown') {
+          const engine = require('../services/pipelineEngine');
+          await engine.setType(pg, conv.conversation_id, mapped);
+        }
+      } catch (err) { logger.warn({ err: err.message }, '[pipeline] recurring type-infer failed'); }
     }
   }
   logger.info({ scanned, scheduled }, '[recurring] done');

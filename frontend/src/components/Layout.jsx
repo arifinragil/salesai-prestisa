@@ -7,6 +7,7 @@ import MessageSearch from './MessageSearch';
 
 const navItems = [
   { href: '/inbox',           label: 'Inbox',     short: 'Inbox' },
+  { href: '/pipeline',        label: 'Pipeline',  short: 'Pipe' },
   { href: '/ai-monitor',      label: 'Monitor',   short: 'Monitor' },
   { href: '/ai-settings',     label: 'Persona',   short: 'Persona' },
   { href: '/knowledge',       label: 'Knowledge', short: 'KB' },

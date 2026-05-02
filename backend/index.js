@@ -17,6 +17,7 @@ const wahaAdminRoutes = require('./routes/wahaAdmin');
 const operatorToolsRoutes = require('./routes/operatorTools');
 const usersRoutes = require('./routes/users');
 const funnelRoutes = require('./routes/funnel');
+const pipelineRoutes = require('./routes/pipeline');
 const healthRoutes = require('./routes/health');
 
 const aiAgent = require('./services/aiAgent');
@@ -53,6 +54,7 @@ app.use('/api/admin/waha', wahaAdminRoutes);
 app.use('/api/ops', operatorToolsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/funnel', funnelRoutes);
+app.use('/api/pipeline', pipelineRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 

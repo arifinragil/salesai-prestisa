@@ -12,7 +12,7 @@ async function run() {
   const enabled = await settings.getSetting('daily_brief_enabled', true);
   if (enabled === false) { logger.info('[brief] disabled'); await pg.end(); return; }
 
-  const [overall, handovers, csat, cost, topReasons, conv] = await Promise.all([
+  const [overall, handovers, csat, cost, topReasons, conv, pipelineByStage, lostReasons] = await Promise.all([
     pg.query(`
       SELECT
         COUNT(*) FILTER (WHERE direction='in') AS inbound,
@@ -42,6 +42,15 @@ async function run() {
           0::int AS orders_converted,
           0::bigint AS revenue
       ) t`),
+    pg.query(`
+      SELECT pipeline_stage, COUNT(*)::int AS n FROM crm_conversations
+      WHERE pipeline_stage NOT IN ('delivered','lost')
+         OR pipeline_stage_at > now() - interval '7 days'
+      GROUP BY pipeline_stage`),
+    pg.query(`
+      SELECT lost_reason, COUNT(*)::int AS n FROM crm_conversations
+      WHERE pipeline_stage = 'lost' AND pipeline_stage_at > now() - interval '24 hours' AND lost_reason IS NOT NULL
+      GROUP BY lost_reason ORDER BY n DESC LIMIT 3`),
   ]);
 
   const o = overall.rows[0];
@@ -53,6 +62,13 @@ async function run() {
   const reasonsTxt = topReasons.rows.length
     ? topReasons.rows.map((r) => `  • ${r.reason}: ${r.n}`).join('\n')
     : '  (tidak ada handover)';
+
+  const pipelineLines = pipelineByStage.rows.length
+    ? pipelineByStage.rows.map((r) => `  • ${r.pipeline_stage}: ${r.n}`).join('\n')
+    : '  (kosong)';
+  const lostLines = lostReasons.rows.length
+    ? lostReasons.rows.map((r) => `  • ${r.lost_reason}: ${r.n}`).join('\n')
+    : '  (tidak ada)';
 
   const body =
 `🌷 <b>Tiara CRM — daily brief</b>
@@ -71,6 +87,12 @@ ${reasonsTxt}
 😊 <b>CSAT 7d</b>: ${cs.avg_score || '-'} (${cs.n || 0} responses)
 💰 <b>AI cost kemarin</b>: $${Number(yC.cost).toFixed(4)}
 🔗 <b>Order link sent</b>: ${cv.links_sent}
+
+🎯 <b>Pipeline today</b>
+${pipelineLines}
+
+😞 <b>Top Lost reason 24h</b>
+${lostLines}
 
 ${PUBLIC_URL}/ai-monitor`;
 
