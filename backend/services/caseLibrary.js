@@ -12,9 +12,7 @@ async function lookup({ inboundBody, intent }) {
     `SELECT id, shortcut, body, case_label, intent_match,
        (
          CASE WHEN intent_match = $1 THEN 50 ELSE 0 END +
-         CASE WHEN $1 IS NOT NULL AND case_pattern IS NOT NULL AND $2 ~* case_pattern THEN 30
-              WHEN case_pattern IS NOT NULL AND $2 ~* case_pattern THEN 30
-              ELSE 0 END +
+         CASE WHEN case_pattern IS NOT NULL AND $2 ~* case_pattern THEN 30 ELSE 0 END +
          GREATEST(0, 20 - EXTRACT(EPOCH FROM (now() - updated_at))::int / 86400 / 30)
        ) AS relevance
      FROM crm_reply_templates

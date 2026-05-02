@@ -211,7 +211,14 @@ Constraint:
 - Kalau 3 suggestion sudah cover semua angle, tawarkan kombinasi atau tambah CTA
 ```
 
-### 3.4 Latency budget
+### 3.4 Environment variables
+
+| Var | Default | Purpose |
+|---|---|---|
+| `COPILOT_AI_MODEL` | `claude-haiku-4-5` | Model id for option-4 synthesis call |
+| `COPILOT_AI_TIMEOUT_MS` | `4000` | Hard timeout on AI elaboration; on timeout option 4 falls back to a "no AI usulan" placeholder |
+
+### 3.5 Latency budget
 
 | Step | Time |
 |---|---|

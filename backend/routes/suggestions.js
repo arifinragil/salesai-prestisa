@@ -41,11 +41,14 @@ router.post('/regenerate', async (req, res) => {
   const msg = msgQ.rows[0];
   if (!msg) return res.status(404).json({ error: 'inbound_msg_missing' });
 
+  // Reuse the intent classifier output from the original generation so case
+  // ranking stays stable across regenerates (otherwise the top 3 reshuffle).
+  const ic = await pg.query(`SELECT last_intent FROM crm_conversations WHERE id = $1`, [convId]);
   const out = await suggestionEngine.generate({
     conversationId: convId,
     inboundMsgId: msg.id,
     inboundBody: msg.body,
-    intent: null,
+    intent: ic.rows[0]?.last_intent || null,
     regen: true,
     regenLogId: log.id,
   });
@@ -57,11 +60,17 @@ router.post('/regenerate', async (req, res) => {
 
 // POST mark suggestion as used
 router.post('/:logId/use', async (req, res) => {
+  const convId = parseInt(req.params.id);
   const logId = parseInt(req.params.logId);
+  if (!Number.isFinite(convId) || !Number.isFinite(logId)) return res.status(400).json({ error: 'bad_params' });
   const { picked_rank, sent_text, sent_msg_id } = req.body || {};
   const staffId = req.staff?.staff_id || null;
 
-  const cur = await pg.query(`SELECT options, shown_at, conversation_id FROM crm_suggestion_log WHERE id = $1`, [logId]);
+  // Bind logId to the URL's conv id — prevents cross-conv tampering.
+  const cur = await pg.query(
+    `SELECT options, shown_at, conversation_id FROM crm_suggestion_log WHERE id = $1 AND conversation_id = $2`,
+    [logId, convId]
+  );
   const log = cur.rows[0];
   if (!log) return res.status(404).json({ error: 'log_not_found' });
 
@@ -80,8 +89,8 @@ router.post('/:logId/use', async (req, res) => {
     `UPDATE crm_suggestion_log
      SET picked_rank = $1, usage_type = $2, sent_msg_id = $3,
          staff_id = $4, pick_latency_ms = $5, edit_distance = $6
-     WHERE id = $7`,
-    [picked_rank || null, usageType, sent_msg_id || null, staffId, pickLatencyMs, editDistance, logId]
+     WHERE id = $7 AND conversation_id = $8`,
+    [picked_rank || null, usageType, sent_msg_id || null, staffId, pickLatencyMs, editDistance, logId, convId]
   );
 
   const io = notify.getIO?.();
@@ -95,14 +104,18 @@ router.post('/:logId/use', async (req, res) => {
 
 // POST flag suggestion
 router.post('/:logId/flag', async (req, res) => {
+  const convId = parseInt(req.params.id);
   const logId = parseInt(req.params.logId);
+  if (!Number.isFinite(convId) || !Number.isFinite(logId)) return res.status(400).json({ error: 'bad_params' });
   const { reason, note } = req.body || {};
   const allowed = ['off_tone', 'wrong', 'irrelevant', 'harmful'];
   if (!allowed.includes(reason)) return res.status(400).json({ error: 'bad_reason' });
-  await pg.query(
-    `UPDATE crm_suggestion_log SET flagged_reason = $1, flagged_note = $2 WHERE id = $3`,
-    [reason, note || null, logId]
+  const r = await pg.query(
+    `UPDATE crm_suggestion_log SET flagged_reason = $1, flagged_note = $2
+     WHERE id = $3 AND conversation_id = $4`,
+    [reason, note || null, logId, convId]
   );
+  if (r.rowCount === 0) return res.status(404).json({ error: 'log_not_found' });
   res.json({ ok: true });
 });
 
