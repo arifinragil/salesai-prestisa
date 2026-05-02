@@ -259,7 +259,7 @@ async function search_products({ args }) {
   const limit = clampInt(args.limit, 5, 10);
 
   function buildSql(useCity) {
-    const where = ['p.deleted_at IS NULL', 'p.price > 0'];
+    const where = ['p.deleted_at IS NULL', 'p.price > 0', '(c.deleted_at IS NULL OR c.id IS NULL)'];
     const params = [];
     if (args.category) {
       // Strategi 1: product_code prefix (paling reliable jika intent jelas)
