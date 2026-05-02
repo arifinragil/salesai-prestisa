@@ -19,6 +19,7 @@ router.get('/conversations', async (req, res) => {
   const search = (req.query.search || '').toString().trim().toLowerCase();
   const queue = req.query.queue; // 'mine' | 'unassigned' | 'team'
   const tagId = parseInt(req.query.tag_id) || null;
+  const sort = req.query.sort || 'recent'; // 'recent' | 'temp'
   const params = [];
   const where = [];
   if (status && ['active', 'closed', 'spam'].includes(status)) {
@@ -64,7 +65,8 @@ router.get('/conversations', async (req, res) => {
     SELECT conv.id, conv.phone, conv.real_phone, conv.push_name,
            conv.customer_id, conv.status, conv.ai_enabled,
            conv.ai_paused_until, conv.assigned_staff_id, conv.last_message_at,
-           conv.last_intent, conv.handover_count, conv.shadow_mode, conv.wa_session,
+           conv.last_intent, conv.lead_temperature, conv.lead_score,
+           conv.handover_count, conv.shadow_mode, conv.wa_session,
            conv.experiment_variant,
            conv.pipeline_stage, conv.pipeline_type, conv.manual_stage_override,
            lm.body AS last_body, lm.sender_type AS last_sender, lm.created_at AS last_at,
@@ -75,7 +77,11 @@ router.get('/conversations', async (req, res) => {
     LEFT JOIN handover_open ho ON ho.conversation_id = conv.id
     LEFT JOIN conv_tags ct ON ct.conversation_id = conv.id
     ${whereSql}
-    ORDER BY COALESCE(conv.last_message_at, conv.updated_at) DESC
+    ${sort === 'temp'
+      ? `ORDER BY CASE conv.lead_temperature WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 ELSE 2 END,
+                  conv.lead_score DESC NULLS LAST,
+                  COALESCE(conv.last_message_at, conv.updated_at) DESC`
+      : `ORDER BY COALESCE(conv.last_message_at, conv.updated_at) DESC`}
     LIMIT 200`;
   const { rows } = await pg.query(sql, params);
   const items = search
