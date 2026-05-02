@@ -32,6 +32,7 @@ router.get('/agents', async (_req, res) => {
        GROUP BY staff_id
      )
      SELECT u.id AS staff_id, u.username, u.full_name, u.role,
+            u.coaching_status, u.coaching_set_at,
             t.performance_score AS today_score,
             tr.avg7d AS avg7d_score, tr.series AS series7d,
             COALESCE(f.open_flags, 0) AS open_flags,
@@ -53,7 +54,9 @@ router.get('/agents/:id', async (req, res) => {
   const days = Math.min(90, parseInt(req.query.days) || 30);
 
   const [user, scores, flags, sugStats] = await Promise.all([
-    pg.query(`SELECT id, username, full_name, role, active, last_login_at FROM staff_users WHERE id = $1`, [staffId]),
+    pg.query(`SELECT id, username, full_name, role, active, last_login_at,
+                     coaching_status, coaching_note, coaching_set_at, coaching_set_by
+              FROM staff_users WHERE id = $1`, [staffId]),
     pg.query(
       `SELECT * FROM crm_agent_daily_scores
        WHERE staff_id = $1 AND date >= current_date - ($2 || ' days')::interval
@@ -88,6 +91,25 @@ router.get('/agents/:id', async (req, res) => {
     flags: flags.rows,
     suggestion_stats: sugStats.rows,
   });
+});
+
+// POST /agents/:id/coaching — set/clear coaching tag
+router.post('/agents/:id/coaching', async (req, res) => {
+  const staffId = parseInt(req.params.id);
+  if (!Number.isFinite(staffId)) return res.status(400).json({ error: 'bad_id' });
+  const { status, note } = req.body || {};
+  const allowed = ['one_on_one_scheduled', 'remediation', 'probation'];
+  if (status && !allowed.includes(status)) return res.status(400).json({ error: 'bad_status' });
+  await pg.query(
+    `UPDATE staff_users
+     SET coaching_status = $2,
+         coaching_note   = $3,
+         coaching_set_at = CASE WHEN $2::varchar IS NULL THEN NULL ELSE now() END,
+         coaching_set_by = CASE WHEN $2::varchar IS NULL THEN NULL ELSE $4 END
+     WHERE id = $1`,
+    [staffId, status || null, note ? String(note).slice(0, 500) : null, req.staff.staff_id]
+  );
+  res.json({ ok: true });
 });
 
 // POST /flags/:id/resolve — mark red flag resolved

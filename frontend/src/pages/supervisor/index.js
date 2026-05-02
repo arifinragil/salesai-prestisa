@@ -67,7 +67,12 @@ export default function SupervisorIndex() {
                       <Link href={`/supervisor/${a.staff_id}`} className="text-brand-700 hover:underline font-medium">
                         {a.full_name || a.username}
                       </Link>
-                      <div className="text-xs text-slate-400">@{a.username} · {a.role}</div>
+                      <div className="text-xs text-slate-400">@{a.username} · {a.role}
+                        {a.coaching_status && (
+                          <span className="ml-1 inline-flex items-center text-[10px] px-1 rounded border border-purple-200 bg-purple-50 text-purple-700"
+                            title={a.coaching_status}>🎯</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2"><PerformanceTierPill score={a.today_score} /></td>
                     <td className="px-3 py-2 text-right text-sm">

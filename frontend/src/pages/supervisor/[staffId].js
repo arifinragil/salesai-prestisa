@@ -18,6 +18,9 @@ export default function SupervisorAgent() {
   const [filter, setFilter] = useState('open');
   const [resolveId, setResolveId] = useState(null);
   const [note, setNote] = useState('');
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachStatus, setCoachStatus] = useState('');
+  const [coachNote, setCoachNote] = useState('');
 
   if (me.data && me.data.user?.role !== 'admin') {
     return <Layout title="Supervisor"><div className="p-12 text-center text-rose-600">Admin only</div></Layout>;
@@ -48,15 +51,26 @@ export default function SupervisorAgent() {
         </div>
 
         {staff && (
-          <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-2">
             <div>
               <h1 className="text-lg font-semibold text-slate-800">{staff.full_name || staff.username}</h1>
               <div className="text-xs text-slate-500 mt-1">@{staff.username} · {staff.role}
                 {staff.last_login_at && <> · last login {formatRelative(staff.last_login_at)}</>}
               </div>
+              {staff.coaching_status && (
+                <div className="mt-2 inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-purple-200 bg-purple-50 text-purple-700">
+                  🎯 {{ one_on_one_scheduled: '1-on-1 scheduled', remediation: 'Remediation in progress', probation: 'On probation' }[staff.coaching_status] || staff.coaching_status}
+                  {staff.coaching_note && <span className="text-purple-500"> — {staff.coaching_note}</span>}
+                  {staff.coaching_set_at && <span className="text-purple-400">· {formatRelative(staff.coaching_set_at)}</span>}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <PerformanceTierPill score={todayScore} showScore />
+              <button onClick={() => { setCoachStatus(staff.coaching_status || ''); setCoachNote(staff.coaching_note || ''); setCoachOpen(true); }}
+                className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50">
+                🎯 Coaching
+              </button>
             </div>
           </div>
         )}
@@ -179,6 +193,41 @@ export default function SupervisorAgent() {
           </div>
         )}
       </div>
+
+      {coachOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50" onClick={() => setCoachOpen(false)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-4 m-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">Coaching status</h3>
+            <select value={coachStatus} onChange={(e) => setCoachStatus(e.target.value)}
+              className="w-full text-sm border border-slate-200 rounded px-2 py-1.5 mb-2">
+              <option value="">— None —</option>
+              <option value="one_on_one_scheduled">1-on-1 scheduled</option>
+              <option value="remediation">Remediation in progress</option>
+              <option value="probation">On probation</option>
+            </select>
+            <textarea value={coachNote} onChange={(e) => setCoachNote(e.target.value)}
+              placeholder="Catatan (opsional)…" rows={3}
+              className="w-full text-sm border border-slate-200 rounded p-2 mb-3" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setCoachOpen(false)}
+                className="text-sm px-3 py-1.5 rounded border border-slate-200">Cancel</button>
+              <button onClick={async () => {
+                try {
+                  await api(`/api/supervisor/agents/${staffId}/coaching`, {
+                    method: 'POST', body: { status: coachStatus || null, note: coachNote || null },
+                  });
+                  toast.success('Coaching updated');
+                  setCoachOpen(false);
+                  data.mutate();
+                } catch (e) { toast.error(e.message); }
+              }}
+                className="text-sm px-3 py-1.5 rounded bg-purple-500 text-white hover:bg-purple-600">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {resolveId && (
         <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50" onClick={() => setResolveId(null)}>
