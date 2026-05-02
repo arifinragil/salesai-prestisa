@@ -38,16 +38,19 @@ function extractPriceMentions(reply) {
   // (order number, tracking, phone) and ignored.
   const PRICE_MAX = 100_000_000;
 
-  const reK = /\b(\d{1,4})\s*(k|rb|ribu)\b/gi;
+  // Use lookbehind/lookahead instead of \b — \b fails when preceded by letter
+  // (mis. "Rp1.500.000" — "p1" tidak punya word boundary, jadi match start dari
+  // "5" di "500.000", bukan "1.500.000" full). Lookbehind digit only catches
+  // genuinely-separate numeric runs.
+  const reK = /(?<!\d)(\d{1,4})\s*(k|rb|ribu)(?!\w)/gi;
   let m;
   while ((m = reK.exec(reply)) !== null) {
     const n = parseInt(m[1]) * 1000;
     if (n >= 10000 && n <= PRICE_MAX) out.add(String(n));
   }
 
-  // Match thousand-separated forms (1.500.000) or compact 5-9 digit numbers.
-  // Beyond 9 digits = clearly an identifier, not a price.
-  const reN = /\b(\d{1,3}(?:[.,]\d{3})+|\d{5,9})\b/g;
+  // Thousand-separated (1.500.000) or compact 5-9 digit. Beyond 9 = identifier.
+  const reN = /(?<!\d)(\d{1,3}(?:[.,]\d{3})+|\d{5,9})(?!\d)/g;
   while ((m = reN.exec(reply)) !== null) {
     const n = parseInt(m[1].replace(/[.,]/g, ''));
     if (n >= 10000 && n <= PRICE_MAX) out.add(String(n));
@@ -56,8 +59,15 @@ function extractPriceMentions(reply) {
   return Array.from(out);
 }
 
+// Known constants from persona prompt (ongkir, lead time, dll) yang AI sah
+// sebut tanpa harus call tool. Hindari false-positive guardrails.
+const ALWAYS_ALLOWED_PRICES = new Set([
+  '50000',   // ongkir luar Jabodetabek (sebut di persona)
+  '0',       // free ongkir Jabodetabek
+]);
+
 function collectToolPrices(toolCalls) {
-  const prices = new Set();
+  const prices = new Set(ALWAYS_ALLOWED_PRICES);
   for (const c of toolCalls || []) {
     const r = c.result;
     if (!r) continue;
