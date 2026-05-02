@@ -30,8 +30,8 @@ export function formatPhone(phone) {
   if (!phone) return '—';
   const s = String(phone);
   // WhatsApp Linked Identifier — opaque internal ID, customer pakai privacy mode.
-  // Bukan phone number, jadi tidak bisa di-format. Kasih label jelas.
-  if (s.endsWith('@lid')) {
+  // Detect baik via @lid suffix maupun LID-shape (15+ digit start "12").
+  if (isLidPhone(s)) {
     return '🔒 No. privasi';
   }
   // Strip any other JID suffix (@c.us, @s.whatsapp.net)
@@ -48,20 +48,26 @@ export function formatPhone(phone) {
   return head;
 }
 
-// Helper: detect @lid (privacy mode) — used to show "set No. asli" hint
+// Helper: detect @lid (privacy mode) — checks suffix OR LID-shaped digits.
+// LID is opaque internal ID, biasanya 14-18 digit, tidak start dengan country code.
 export function isLidPhone(phone) {
-  return !!phone && String(phone).endsWith('@lid');
+  if (!phone) return false;
+  const s = String(phone);
+  if (s.endsWith('@lid')) return true;
+  const digits = s.split('@')[0].replace(/\D/g, '');
+  // LID-shape: 13+ digit and tidak start dengan country code Indonesian (62)
+  // atau valid international code (1=US, 44=UK, 65=SG, dll). Heuristic: yang
+  // start "1" dengan length >=14 + bukan US (yg 11 digit) → LID.
+  if (digits.length >= 13 && digits.startsWith('12') && digits.length >= 14) return true;
+  return false;
 }
 
 // Display name with sensible fallback. Hide redundant push_name kalau
-// == raw LID digits.
+// == raw LID digits, dan replace LID-shaped string dengan label.
 export function formatDisplayName(pushName, phone) {
   if (!pushName) return formatPhone(phone);
-  // If push_name is just raw digits matching LID head, hide it
-  if (isLidPhone(phone)) {
-    const lidHead = String(phone).split('@')[0];
-    if (pushName === lidHead) return '🔒 No. privasi';
-  }
+  // If push_name itself looks like LID (15+ digit), masquerade
+  if (isLidPhone(pushName)) return '🔒 No. privasi';
   return pushName;
 }
 
