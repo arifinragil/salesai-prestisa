@@ -7,20 +7,20 @@ import MessageSearch from './MessageSearch';
 import NotificationsBell from './NotificationsBell';
 
 const navItems = [
-  { href: '/inbox',           label: 'Inbox',     short: 'Inbox' },
-  { href: '/pipeline',        label: 'Pipeline',  short: 'Pipe' },
-  { href: '/tasks',           label: 'Tasks',     short: 'Tasks' },
-  { href: '/supervisor',      label: 'Supervisor', short: 'Sup', adminOnly: true },
-  { href: '/lead-distribution', label: 'Leads',   short: 'Leads', adminOnly: true },
-  { href: '/ai-monitor',      label: 'Monitor',   short: 'Monitor' },
-  { href: '/ai-settings',     label: 'Persona',   short: 'Persona' },
-  { href: '/knowledge',       label: 'Knowledge', short: 'KB' },
-  { href: '/reply-templates', label: 'Templates', short: 'Tmpl' },
-  { href: '/tags',            label: 'Tags',      short: 'Tags' },
-  { href: '/promos',          label: 'Promo',     short: 'Promo' },
-  { href: '/sql-queries',     label: 'SQL',       short: 'SQL' },
-  { href: '/users',           label: 'Users',     short: 'Users' },
-  { href: '/snippets',        label: 'Snippets',  short: 'Snip' },
+  { href: '/inbox',             label: 'Inbox',      icon: '💬' },
+  { href: '/pipeline',          label: 'Pipeline',   icon: '📊' },
+  { href: '/tasks',             label: 'Tasks',      icon: '✅' },
+  { href: '/supervisor',        label: 'Supervisor', icon: '👁',  adminOnly: true },
+  { href: '/lead-distribution', label: 'Leads',      icon: '🎯', adminOnly: true },
+  { href: '/ai-monitor',        label: 'Monitor',    icon: '📡' },
+  { href: '/ai-settings',       label: 'Persona',    icon: '🤖' },
+  { href: '/knowledge',         label: 'Knowledge',  icon: '📚' },
+  { href: '/reply-templates',   label: 'Templates',  icon: '📝' },
+  { href: '/tags',              label: 'Tags',       icon: '🏷️' },
+  { href: '/promos',            label: 'Promo',      icon: '🎁' },
+  { href: '/sql-queries',       label: 'SQL',        icon: '🗄' },
+  { href: '/users',             label: 'Users',      icon: '👤' },
+  { href: '/snippets',          label: 'Snippets',   icon: '✂️' },
 ];
 
 function isActive(pathname, href) {
@@ -34,6 +34,16 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
   const { user, isLoading, unauthenticated } = useUser({ redirectTo: '/login' });
   const [searchOpen, setSearchOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Desktop sidebar: persist collapsed state
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('tiara_sidebar_open') : null;
+    if (saved === '0') setSidebarOpen(false);
+  }, []);
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('tiara_sidebar_open', sidebarOpen ? '1' : '0');
+  }, [sidebarOpen]);
 
   // Cmd/Ctrl+K opens search globally
   useEffect(() => {
@@ -42,12 +52,17 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
         e.preventDefault();
         setSearchOpen(true);
       }
+      // Cmd/Ctrl+B toggles sidebar (desktop convention)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+      }
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Close drawer on route change
+  // Close mobile drawer on route change
   useEffect(() => {
     function close() { setDrawerOpen(false); }
     router.events.on('routeChangeStart', close);
@@ -78,44 +93,42 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
   }
   if (unauthenticated || !user) return null;
 
+  const visibleNav = navItems.filter((it) => !it.adminOnly || user?.role === 'admin');
+
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Top bar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="px-3 sm:px-6 py-3 flex items-center justify-between gap-2">
-          {/* Mobile burger + brand */}
+        <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
+            {/* Mobile burger */}
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
-              aria-label="Buka menu navigasi"
+              aria-label="Buka menu"
               className="md:hidden w-10 h-10 inline-flex items-center justify-center rounded-md text-slate-700 hover:bg-slate-100"
             >
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                 <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
               </svg>
             </button>
-            <Link href="/inbox" className="font-semibold text-slate-800 truncate">
+            {/* Desktop sidebar toggle */}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((v) => !v)}
+              aria-label={sidebarOpen ? 'Sembunyikan menu' : 'Tampilkan menu'}
+              title={`${sidebarOpen ? 'Sembunyikan' : 'Tampilkan'} menu (⌘B)`}
+              className="hidden md:inline-flex w-9 h-9 items-center justify-center rounded-md text-slate-700 hover:bg-slate-100"
+            >
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </button>
+            <Link href="/inbox" className="font-semibold text-slate-800 truncate text-sm sm:text-base">
               Tiara CRM
             </Link>
-            {/* Desktop nav */}
-            <nav className="hidden md:flex gap-1 ml-4">
-              {navItems.filter((it) => !it.adminOnly || user?.role === 'admin').map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`px-3 py-1.5 rounded-md text-sm transition ${
-                    isActive(router.pathname, item.href)
-                      ? 'bg-brand-50 text-brand-700 font-medium'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
           </div>
 
-          {/* Right cluster */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setSearchOpen(true)}
@@ -137,11 +150,11 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
             </button>
             <NotificationsBell />
             <span className="hidden lg:inline text-sm text-slate-500 truncate max-w-[160px]" title={`${user.username} (${user.role})`}>
-              {user.username} ({user.role})
+              {user.username} <span className="text-slate-400">({user.role})</span>
             </span>
             <a
               href="/admin/waha-sessions.html"
-              className="hidden md:inline w-9 h-9 items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 inline-flex"
+              className="hidden md:inline-flex w-9 h-9 items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               title="WAHA session admin"
               aria-label="WAHA session admin"
             >
@@ -150,6 +163,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
             <button
               onClick={logout}
               className="hidden md:inline text-sm text-slate-500 hover:text-rose-600 px-2 py-1.5"
+              title="Logout"
             >
               Logout
             </button>
@@ -157,74 +171,107 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
         </div>
       </header>
 
-      {/* Mobile drawer */}
-      {drawerOpen && (
-        <div className="md:hidden fixed inset-0 z-30" role="dialog" aria-modal="true">
-          <button
-            type="button"
-            aria-label="Tutup menu"
-            onClick={() => setDrawerOpen(false)}
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-          />
-          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl flex flex-col">
-            <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between">
-              <span className="font-semibold text-slate-800">Tiara CRM</span>
-              <button
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Tutup menu"
-                className="w-9 h-9 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
-              >
-                ✕
-              </button>
-            </div>
-            <nav className="flex-1 px-2 py-3 overflow-y-auto">
-              {navItems.filter((it) => !it.adminOnly || user?.role === 'admin').map((item) => (
+      {/* Body: desktop sidebar + main */}
+      <div className="flex-1 flex">
+        {/* Desktop sidebar */}
+        <aside
+          className={`hidden md:flex flex-col bg-white border-r border-slate-200 sticky top-[49px] self-start transition-[width] duration-150 ease-out overflow-hidden ${
+            sidebarOpen ? 'w-56' : 'w-0'
+          }`}
+          style={{ height: 'calc(100vh - 49px)' }}
+          aria-hidden={!sidebarOpen}
+        >
+          <nav className="flex-1 overflow-y-auto py-3 px-2 min-w-[14rem]">
+            {visibleNav.map((item) => {
+              const active = isActive(router.pathname, item.href);
+              return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`block px-4 py-3 rounded-md text-sm mb-1 ${
-                    isActive(router.pathname, item.href)
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm mb-0.5 transition ${
+                    active
                       ? 'bg-brand-50 text-brand-700 font-medium'
                       : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  {item.label}
+                  <span aria-hidden className="w-5 text-center text-base leading-none">{item.icon}</span>
+                  <span className="truncate">{item.label}</span>
                 </Link>
-              ))}
-              <div className="border-t border-slate-100 mt-2 pt-2">
-                <a
-                  href="/admin/waha-sessions.html"
-                  className="block px-4 py-3 rounded-md text-sm text-slate-700 hover:bg-slate-100"
+              );
+            })}
+          </nav>
+          <div className="border-t border-slate-200 px-2 py-2 min-w-[14rem]">
+            <a href="/admin/waha-sessions.html"
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-xs text-slate-600 hover:bg-slate-100">
+              <span aria-hidden className="w-5 text-center">⚙</span>
+              <span className="truncate">WAHA Sessions</span>
+            </a>
+          </div>
+        </aside>
+
+        {/* Mobile drawer */}
+        {drawerOpen && (
+          <div className="md:hidden fixed inset-0 z-30" role="dialog" aria-modal="true">
+            <button
+              type="button"
+              aria-label="Tutup menu"
+              onClick={() => setDrawerOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl flex flex-col">
+              <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between">
+                <span className="font-semibold text-slate-800">Tiara CRM</span>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Tutup menu"
+                  className="w-9 h-9 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
                 >
-                  ⚙ WAHA Sessions
-                </a>
-                <a
-                  href="/admin/settings.html"
-                  className="block px-4 py-3 rounded-md text-sm text-slate-700 hover:bg-slate-100"
-                >
-                  ⚙ Admin Settings (legacy)
-                </a>
+                  ✕
+                </button>
               </div>
-            </nav>
-            <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
-              <span className="text-sm text-slate-500 truncate" title={`${user.username} (${user.role})`}>
-                {user.username} <span className="text-slate-400">({user.role})</span>
-              </span>
-              <button
-                onClick={() => { setDrawerOpen(false); logout(); }}
-                className="text-sm text-rose-600 px-3 py-1.5 rounded-md hover:bg-rose-50"
-              >
-                Logout
-              </button>
+              <nav className="flex-1 px-2 py-3 overflow-y-auto">
+                {visibleNav.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-md text-sm mb-1 ${
+                      isActive(router.pathname, item.href)
+                        ? 'bg-brand-50 text-brand-700 font-medium'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span aria-hidden className="w-5 text-center text-base">{item.icon}</span>
+                    <span>{item.label}</span>
+                  </Link>
+                ))}
+                <div className="border-t border-slate-100 mt-2 pt-2">
+                  <a href="/admin/waha-sessions.html"
+                    className="block px-4 py-3 rounded-md text-sm text-slate-700 hover:bg-slate-100">
+                    ⚙ WAHA Sessions
+                  </a>
+                </div>
+              </nav>
+              <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
+                <span className="text-sm text-slate-500 truncate" title={`${user.username} (${user.role})`}>
+                  {user.username} <span className="text-slate-400">({user.role})</span>
+                </span>
+                <button
+                  onClick={() => { setDrawerOpen(false); logout(); }}
+                  className="text-sm text-rose-600 px-3 py-1.5 rounded-md hover:bg-rose-50"
+                >
+                  Logout
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <main className="flex-1">
-        <title>{title}</title>
-        {children}
-      </main>
+        <main className="flex-1 min-w-0">
+          <title>{title}</title>
+          {children}
+        </main>
+      </div>
+
       <MessageSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
