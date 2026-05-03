@@ -26,6 +26,7 @@ const suggestionsRoutes = require('./routes/suggestions');
 const supervisorRoutes = require('./routes/supervisor');
 const leadDistRoutes = require('./routes/leadDist');
 const retentionRoutes = require('./routes/retention');
+const b2bRoutes = require('./routes/b2b');
 
 const aiAgent = require('./services/aiAgent');
 
@@ -69,6 +70,7 @@ app.use('/api/saved-views', savedViewsRoutes);
 app.use('/api/supervisor', supervisorRoutes);
 app.use('/api/lead-dist', leadDistRoutes);
 app.use('/api/retention', retentionRoutes);
+app.use('/api/b2b', b2bRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 

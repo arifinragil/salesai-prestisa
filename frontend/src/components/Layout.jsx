@@ -13,6 +13,7 @@ const navItems = [
   { href: '/supervisor',        label: 'Supervisor', icon: '👁',  adminOnly: true },
   { href: '/lead-distribution', label: 'Leads',      icon: '🎯', adminOnly: true },
   { href: '/retention',         label: 'Retention',  icon: '🔁', adminOnly: true },
+  { href: '/b2b-outreach',      label: 'B2B Outreach', icon: '🏢', adminOnly: true },
   { href: '/ai-monitor',        label: 'Monitor',    icon: '📡' },
   { href: '/ai-settings',       label: 'Persona',    icon: '🤖' },
   { href: '/knowledge',         label: 'Knowledge',  icon: '📚' },
