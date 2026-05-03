@@ -162,6 +162,14 @@ router.post('/waha', verifyWebhookSecret, async (req, res) => {
         .catch((err) => console.warn('[leadTemp] compute failed:', err.message));
     } catch {}
 
+    // Lead distribution — only on first inbound for a conv (no assigned staff yet).
+    // Fire-and-forget: assignment is best-effort, must not block ingest.
+    try {
+      const leadDist = require('../services/leadDistributor');
+      leadDist.distribute(conv.id)
+        .catch((err) => console.warn('[leadDist] distribute failed:', err.message));
+    } catch {}
+
     // Debounce: process_after = now()+10s. If sibling pending jobs exist for
     // this conv, push them forward to the same time so the worker picks only
     // the latest one and treats the burst as a single user turn.

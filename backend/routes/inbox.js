@@ -44,6 +44,13 @@ router.get('/conversations', async (req, res) => {
     params.push(req.query.pipeline_stage);
     where.push(`conv.pipeline_stage = $${params.length}`);
   }
+  // Role-based visibility: acquisition + retention only see their assigned convs.
+  // Other roles (admin, operator, viewer, staff) see all.
+  const ROLE_PRIVATE = new Set(['acquisition', 'retention']);
+  if (ROLE_PRIVATE.has(req.staff.role)) {
+    params.push(req.staff.staff_id);
+    where.push(`conv.assigned_staff_id = $${params.length}`);
+  }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
     WITH last_msg AS (

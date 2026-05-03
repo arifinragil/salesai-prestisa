@@ -11,6 +11,7 @@ const navItems = [
   { href: '/pipeline',        label: 'Pipeline',  short: 'Pipe' },
   { href: '/tasks',           label: 'Tasks',     short: 'Tasks' },
   { href: '/supervisor',      label: 'Supervisor', short: 'Sup', adminOnly: true },
+  { href: '/lead-distribution', label: 'Leads',   short: 'Leads', adminOnly: true },
   { href: '/ai-monitor',      label: 'Monitor',   short: 'Monitor' },
   { href: '/ai-settings',     label: 'Persona',   short: 'Persona' },
   { href: '/knowledge',       label: 'Knowledge', short: 'KB' },
