@@ -25,6 +25,7 @@ const healthRoutes = require('./routes/health');
 const suggestionsRoutes = require('./routes/suggestions');
 const supervisorRoutes = require('./routes/supervisor');
 const leadDistRoutes = require('./routes/leadDist');
+const retentionRoutes = require('./routes/retention');
 
 const aiAgent = require('./services/aiAgent');
 
@@ -67,6 +68,7 @@ app.use('/api/users/me/notifications', notificationsRoutes);
 app.use('/api/saved-views', savedViewsRoutes);
 app.use('/api/supervisor', supervisorRoutes);
 app.use('/api/lead-dist', leadDistRoutes);
+app.use('/api/retention', retentionRoutes);
 app.use('/webhook', webhookRoutes);
 app.use(healthRoutes);
 
