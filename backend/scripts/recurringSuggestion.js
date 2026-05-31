@@ -33,6 +33,7 @@ async function run() {
            AND o.deleted_at IS NULL AND oi.deleted_at IS NULL
            AND oi.receiver_name IS NOT NULL AND oi.receiver_name != ''
            AND oi.date_time IS NOT NULL
+           AND LOWER(oi.occasion) IN ('birthday', 'anniversary')
            AND DATE_FORMAT(oi.date_time, '%m-%d') BETWEEN DATE_FORMAT(CURDATE(), '%m-%d')
                                                     AND DATE_FORMAT(CURDATE() + INTERVAL ? DAY, '%m-%d')
            AND TIMESTAMPDIFF(YEAR, oi.date_time, CURDATE()) >= 1`,
@@ -64,7 +65,7 @@ async function run() {
 
       const dt = new Date(h.date_time);
       const dateStr = dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'long' });
-      const body = `Halo Kak 🌷 sekitar tanggal ${dateStr} ${h.years_ago} tahun lalu, Kakak pernah kirim bunga ke ${h.receiver_name}. Kalau berkenan, kami siap bantu siapkan rangkaian baru untuk momen spesialnya tahun ini. Mau dibantu pilihkan?`;
+      const body = `Halo Kak 🌷 sekitar tanggal ${dateStr} ${h.years_ago} tahun lalu, Kakak pernah kirim bunga ke ${h.receiver_name}. Kalau berkenan, kami siap bantu siapkan rangkaian baru untuk momen spesialnya tahun ini. Mau dibantu pilihkan? Silahkan WA ke 6281231828249 untuk mendapatkan diskon khusus dengan tunjukan pesan ini.`;
       await pg.query(
         `INSERT INTO crm_followups (conversation_id, kind, body_template, context, scheduled_for, status)
          VALUES ($1, 'recurring_suggestion', $2, $3, now() + interval '5 minutes', 'pending')`,
