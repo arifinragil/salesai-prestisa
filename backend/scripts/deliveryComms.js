@@ -61,7 +61,7 @@ async function processPaidConfirm() {
   );
   for (const o of orders) {
     const conv = await findConv(o.customer_id, o.phone);
-    const body = `🌷 Terima kasih Kak! Pembayaran untuk pesanan #${o.order_number || o.id} sudah kami terima ✅\n\nTim kami akan segera memproses dan kirim sesuai jadwal. Kalau ada perubahan alamat/detail, balas chat ini sebelum proses pengiriman ya 🙏`;
+    const body = `🌷 Terima kasih Kak! Pembayaran untuk pesanan #${o.order_number || o.id} sudah kami terima ✅\n\n_Pesan otomatis, tidak perlu dibalas. Jika ada pertanyaan lain silakan hubungi sales kami di WA 6281231828249._`;
     const r = await sendPush({ orderId: o.id, kind: 'paid_confirm', body, conv });
     if (r.sent) logger.info({ order_id: o.id, kind: 'paid_confirm' }, '[delivery] sent');
     if (conv) {
@@ -124,7 +124,8 @@ async function processPostDelivery() {
 
 async function run() {
   try { await processPaidConfirm(); } catch (e) { logger.warn({ err: e.message }, '[delivery] paid_confirm err'); }
-  try { await processPreDelivery(); } catch (e) { logger.warn({ err: e.message }, '[delivery] pre err'); }
+  // pre_delivery disabled — disabled by request (handled by sales/operations manually)
+  // try { await processPreDelivery(); } catch (e) { logger.warn({ err: e.message }, '[delivery] pre err'); }
   try { await processPostDelivery(); } catch (e) { logger.warn({ err: e.message }, '[delivery] post err'); }
   await pg.end(); await mysql.end();
 }
