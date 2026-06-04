@@ -128,13 +128,25 @@ export default function LotusConvDetail() {
     return () => clearInterval(iv);
   }, [id, encId]);
 
-  // Auto-scroll to bottom only when a brand-new message arrives at the tail
+  // Jump to bottom on first load; afterwards only auto-scroll when user is near bottom
+  const firstScrollRef = useRef(true);
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || messages.length === 0) return;
+    if (firstScrollRef.current) {
+      firstScrollRef.current = false;
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+        requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+      });
+      return;
+    }
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
     if (isNearBottom) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
+
+  // Reset first-scroll flag when contact changes
+  useEffect(() => { firstScrollRef.current = true; }, [id]);
 
   // Realtime: subscribe to crm:lotus:<id> room
   useSocket({
