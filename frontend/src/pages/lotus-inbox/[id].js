@@ -410,6 +410,7 @@ export default function LotusConvDetail() {
             {messages.map((m) => {
               const mt = (m.message_type || 'text').toLowerCase();
               const isMedia = m.media && m.media.url;
+              const mediaUnavailable = m.media && !m.media.url && m.media.unavailable;
               const isImage = mt === 'image' && isMedia;
               const isVideo = mt === 'video' && isMedia;
               const isDoc   = mt === 'document' && isMedia;
@@ -484,6 +485,21 @@ export default function LotusConvDetail() {
 
                     {isContacts && (
                       <div className="text-[12px] text-slate-600 italic">📇 Kontak dibagikan</div>
+                    )}
+
+                    {mediaUnavailable && (
+                      <div className="flex items-center gap-2 px-2 py-2 bg-slate-50 border border-dashed border-slate-300 rounded-lg">
+                        <span className="w-8 h-8 rounded-md bg-slate-200 text-slate-500 grid place-items-center text-sm flex-shrink-0">
+                          {mt === 'image' ? '🖼️' : mt === 'video' ? '🎬' : mt === 'audio' ? '🎵' : '📄'}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-semibold text-slate-600 uppercase">{mt}</div>
+                          <div className="text-[10px] text-slate-500 truncate" title={m.media.file_name || ''}>
+                            {m.media.file_name || 'file tidak tersedia'}
+                          </div>
+                          <div className="text-[9px] text-slate-400 italic">preview tidak tersedia (URL hilang dari arsip)</div>
+                        </div>
+                      </div>
                     )}
 
                     {(m.body || (isImage && m.media.caption) || (isVideo && m.media.caption)) && (
