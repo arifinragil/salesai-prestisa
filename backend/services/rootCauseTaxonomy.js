@@ -11,8 +11,10 @@ const TAXONOMY = [
   { key: 'timing_pengiriman',     label: 'Timing Pengiriman',     desc: 'H-1/sameday tidak bisa' },
   { key: 'kompetitor',            label: 'Pilih Kompetitor',      desc: 'explicit pilih toko lain' },
   { key: 'ragu_kredibilitas',     label: 'Ragu Kredibilitas',     desc: 'ragu pre-order' },
-  { key: 'window_shopping',       label: 'Window Shopping',       desc: 'tanya iseng' },
-  { key: 'lainnya',               label: 'Lainnya',               desc: 'fallback' },
+  { key: 'window_shopping',       label: 'Window Shopping',       desc: 'tanya iseng / tidak ada intent serius' },
+  { key: 'sudah_closing',         label: 'Sudah Closing',         desc: 'percakapan ini sebenarnya berhasil closing (ada PO/order/foto hasil/konfirmasi pengiriman)' },
+  { key: 'bukan_lead',            label: 'Bukan Lead',            desc: 'bukan calon customer (salah kirim, pitch sales, support komplain non-order, topik di luar pembelian)' },
+  { key: 'lainnya',               label: 'Lainnya',               desc: 'fallback — pakai ini hanya kalau benar-benar tidak ada kategori yang cocok' },
 ];
 
 const KEYS = TAXONOMY.map(t => t.key);
