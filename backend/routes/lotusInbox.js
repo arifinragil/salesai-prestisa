@@ -9,10 +9,14 @@ const mysql = require('../db/mysql');
 const { requireStaff } = require('../middleware/auth');
 const vonage = require('../services/waAdapters/vonageAdapter');
 const { upload, publicUrlFor, attachmentTypeFor } = require('../services/uploadService');
+const lotusWebhook = require('../services/lotusWebhook');
 const aiClient = require('../services/aiClient');
 const persona = require('../services/aiPersona');
 const tools = require('../services/aiTools');
+const caseLibrary = require('../services/caseLibrary');
 const logger = require('../services/logger');
+const { promptInstruction: taxonomyPromptInstruction } = require('../services/rootCauseTaxonomy');
+const { parseRootCauseFromSummary } = require('../services/rootCauseParser');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -55,6 +59,8 @@ router.get('/contacts', async (req, res) => {
   const queue   = req.query.queue;                              // mine | unassigned | all
   const status  = req.query.status;                             // active | closed | spam
   const label   = req.query.label || null;
+  const salesList = String(req.query.sales || '')                // lotus assign_to_user_name (CSV → IN)
+    .split(',').map((s) => s.trim()).filter(Boolean);
   const limit   = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset  = Math.max(parseInt(req.query.offset) || 0, 0);
 
@@ -65,6 +71,17 @@ router.get('/contacts', async (req, res) => {
     where.push(`(LOWER(c.cust_name) LIKE $${params.length} OR c.cust_number LIKE $${params.length})`);
   }
   if (label) { params.push(label); where.push(`c.label = $${params.length}`); }
+  if (salesList.length) {
+    const placeholders = salesList.map((s) => { params.push(s); return `$${params.length}`; });
+    // Match either contacts.assign_to_user_name OR last outbound messages.cs_name.
+    where.push(`(c.assign_to_user_name IN (${placeholders.join(',')})
+                 OR EXISTS (
+                   SELECT 1 FROM messages m
+                    WHERE m.cust_number = c.cust_number
+                      AND m.direction = 'outbound'
+                      AND m.cs_name IN (${placeholders.join(',')})
+                 ))`);
+  }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   // contacts.last_message_at is a lagging aggregate (lotus-tailer only refreshes
@@ -87,7 +104,8 @@ router.get('/contacts', async (req, res) => {
             p.lead_product, p.last_inbound_at,
             COALESCE(lm.received_at, p.last_message_at) AS last_message_at,
             COALESCE(lm.body,        p.last_message)    AS last_message,
-            COALESCE(lm.direction,   p.last_message_from) AS last_message_from
+            COALESCE(lm.direction,   p.last_message_from) AS last_message_from,
+            lcs.cs_name AS last_outbound_cs
      FROM paged p
      LEFT JOIN LATERAL (
        SELECT received_at, body, direction
@@ -96,6 +114,15 @@ router.get('/contacts', async (req, res) => {
        ORDER BY received_at DESC NULLS LAST, id DESC
        LIMIT 1
      ) lm ON true
+     LEFT JOIN LATERAL (
+       SELECT cs_name
+       FROM messages m
+       WHERE m.cust_number = p.cust_number
+         AND m.direction = 'outbound'
+         AND m.cs_name IS NOT NULL
+       ORDER BY received_at DESC NULLS LAST, id DESC
+       LIMIT 1
+     ) lcs ON true
      ORDER BY COALESCE(lm.received_at, p.last_message_at) DESC NULLS LAST`,
     params
   );
@@ -121,7 +148,8 @@ router.get('/contacts', async (req, res) => {
       last_inbound_at: c.last_inbound_at,
       unread: c.unread_counter || 0,
       city_name: c.city_name,
-      lotus_assign_to: c.assign_to_user_name,
+      lotus_assign_to: c.assign_to_user_name || c.last_outbound_cs || null,
+      lotus_assign_source: c.assign_to_user_name ? 'assigned' : (c.last_outbound_cs ? 'last_cs' : null),
       // CRM state overlay:
       assigned_staff_id: s.assigned_staff_id || null,
       status: s.status || 'active',
@@ -140,6 +168,30 @@ router.get('/contacts', async (req, res) => {
   res.json({ success: true, items, count: items.length, limit, offset });
 });
 
+// ── sales-options ──────────────────────────────────────────────────────────
+// Distinct sales (assign_to_user_name) dari lotus.contacts, untuk dropdown filter.
+router.get('/sales-options', async (_req, res) => {
+  // Union of contacts.assign_to_user_name + messages.cs_name (last 90d outbound)
+  // — karena assign_to_user_name sering null tapi cs_name selalu terisi saat sales balas.
+  const { rows } = await lotus.query(
+    `WITH u AS (
+       SELECT assign_to_user_name AS name, COUNT(*)::int AS n
+         FROM contacts
+        WHERE assign_to_user_name IS NOT NULL AND assign_to_user_name <> ''
+        GROUP BY 1
+       UNION ALL
+       SELECT cs_name AS name, COUNT(DISTINCT cust_number)::int AS n
+         FROM messages
+        WHERE direction = 'outbound'
+          AND cs_name IS NOT NULL AND cs_name <> ''
+          AND received_at > now() - interval '90 days'
+        GROUP BY 1
+     )
+     SELECT name, SUM(n)::int AS n FROM u GROUP BY name ORDER BY n DESC, name ASC`
+  );
+  res.json({ success: true, items: rows });
+});
+
 // ── contact detail / profile ───────────────────────────────────────────────
 router.get('/contacts/:lotus_id', async (req, res) => {
   const id = req.params.lotus_id;
@@ -147,17 +199,24 @@ router.get('/contacts/:lotus_id', async (req, res) => {
   if (!c) return res.status(404).json({ success: false, message: 'not found' });
 
   await ensureState(id, c.cust_number);
-  const [{ rows: stateRows }, { rows: lastRows }] = await Promise.all([
+  const [{ rows: stateRows }, { rows: lastRows }, { rows: csRows }] = await Promise.all([
     pg.query(`SELECT * FROM crm_lotus_state WHERE lotus_id = $1`, [id]),
     lotus.query(
       `SELECT MAX(received_at) AS last_inbound
        FROM messages WHERE cust_number = $1 AND direction = 'inbound'`,
       [c.cust_number]
     ),
+    lotus.query(
+      `SELECT cs_name FROM messages
+        WHERE cust_number = $1 AND direction = 'outbound' AND cs_name IS NOT NULL
+        ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1`,
+      [c.cust_number]
+    ),
   ]);
   const s = stateRows[0] || {};
   // Override stale aggregate with fresh value from messages
   const freshLastInbound = lastRows[0]?.last_inbound || c.last_inbound_at;
+  const lastOutboundCs = csRows[0]?.cs_name || null;
 
   res.json({
     success: true,
@@ -168,7 +227,8 @@ router.get('/contacts/:lotus_id', async (req, res) => {
       lead_product: c.lead_product, city_name: c.city_name,
       last_message: c.last_message, last_message_at: c.last_message_at,
       last_inbound_at: freshLastInbound, unread_counter: c.unread_counter,
-      lotus_assigned_to: c.assign_to_user_name,
+      lotus_assigned_to: c.assign_to_user_name || lastOutboundCs || null,
+      lotus_assigned_source: c.assign_to_user_name ? 'assigned' : (lastOutboundCs ? 'last_cs' : null),
     },
     state: {
       assigned_staff_id: s.assigned_staff_id || null,
@@ -368,23 +428,37 @@ router.post('/contacts/:lotus_id/send', async (req, res) => {
   // Insert as outbound row in lotus.messages (lotus_id is per-message UNIQUE;
   // we use Vonage message_uuid, fallback to crm-prefixed timestamp).
   const msgLotusId = sent.id ? `vonage:${sent.id}` : `crm:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  let insertedRowId = null;
   try {
-    await lotus.query(
+    const { rows: ins } = await lotus.query(
       `INSERT INTO messages
          (lotus_id, message_id, direction, cust_number, cust_name, business_number,
           channel, message_type, body, received_at, created_at, cs_id, cs_name, raw_doc, ingested_at)
        VALUES ($1, $2, 'outbound', $3, $4, $5, 'whatsapp', 'text', $6, now(), now(),
                $7, $8, $9::jsonb, now())
-       ON CONFLICT (lotus_id) DO NOTHING`,
+       ON CONFLICT (lotus_id) DO NOTHING
+       RETURNING id`,
       [
         msgLotusId, sent.id || null, c.cust_number, c.cust_name, c.business_number,
         body, req.staff.staff_id, req.staff.full_name || req.staff.username || null,
         JSON.stringify({ source: 'salesai_crm', vonage: sent.raw || null }),
       ]
     );
+    insertedRowId = ins[0]?.id || null;
   } catch (err) {
     logger.warn({ err: err.message }, '[lotusInbox.send] lotus insert failed (non-fatal)');
   }
+
+  // Notify Lotus app webhook (best-effort, non-blocking)
+  lotusWebhook.saveMessage({
+    from: senderFrom,
+    to: c.cust_number,
+    messageId: sent.id || '',
+    messageText: body,
+    contactName: c.cust_name || 'Customer',
+    hsmName: '',
+    isHsm: false,
+  }).catch(() => {});
 
   // Bump first_response_at in crm_lotus_state
   await ensureState(id, c.cust_number);
@@ -399,7 +473,8 @@ router.post('/contacts/:lotus_id/send', async (req, res) => {
     const msgPayload = {
       lotus_id: id,
       message: {
-        id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: insertedRowId,
+        message_id: sent.id || null,
         direction: 'out', sender_type: 'staff',
         staff_name: req.staff.full_name || req.staff.username || null,
         body, message_type: 'text',
@@ -483,14 +558,16 @@ router.post('/contacts/:lotus_id/send-file', upload.single('file'), async (req, 
   // Mirror in lotus.messages so it appears in the chat thread
   const msgLotusId = sent.id ? `vonage:${sent.id}` : `crm:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
   const msgType = attachType.toUpperCase(); // IMAGE | DOCUMENT | VIDEO | AUDIO
+  let insertedRowId = null;
   try {
-    await lotus.query(
+    const { rows: ins } = await lotus.query(
       `INSERT INTO messages
          (lotus_id, message_id, direction, cust_number, cust_name, business_number,
           channel, message_type, body, received_at, created_at, cs_id, cs_name, raw_doc, ingested_at)
        VALUES ($1, $2, 'outbound', $3, $4, $5, 'whatsapp', $6, $7, now(), now(),
                $8, $9, $10::jsonb, now())
-       ON CONFLICT (lotus_id) DO NOTHING`,
+       ON CONFLICT (lotus_id) DO NOTHING
+       RETURNING id`,
       [
         msgLotusId, sent.id || null, c.cust_number, c.cust_name, c.business_number,
         msgType, caption || '',
@@ -511,9 +588,23 @@ router.post('/contacts/:lotus_id/send-file', upload.single('file'), async (req, 
         }),
       ]
     );
+    insertedRowId = ins[0]?.id || null;
   } catch (err) {
     logger.warn({ err: err.message }, '[lotusInbox.send-file] lotus insert failed (non-fatal)');
   }
+
+  // Notify Lotus app webhook (best-effort, non-blocking)
+  lotusWebhook.saveMessage({
+    from: senderFrom,
+    to: c.cust_number,
+    messageId: sent.id || '',
+    messageText: caption || '',
+    contactName: c.cust_name || 'Customer',
+    hsmName: '',
+    fileName: req.file.originalname,
+    fileUrl: url,
+    isHsm: false,
+  }).catch(() => {});
 
   await ensureState(id, c.cust_number);
   await pg.query(
@@ -527,7 +618,8 @@ router.post('/contacts/:lotus_id/send-file', upload.single('file'), async (req, 
     const msgPayload = {
       lotus_id: id,
       message: {
-        id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: insertedRowId,
+        message_id: sent.id || null,
         direction: 'out', sender_type: 'staff',
         staff_name: req.staff.full_name || req.staff.username || null,
         body: caption || '',
@@ -700,11 +792,138 @@ Saat ini operator manusia handle chat ini di /lotus-inbox. Tugasmu:
   }
 });
 
+// 4-option reply suggestions (mirrors /inbox CoPilot): 3 case library + 1 AI synth.
+// No DB persistence — Lotus mirror tidak punya crm_suggestion_log keyed by lotus_id.
+router.post('/contacts/:lotus_id/ai-suggestions', async (req, res) => {
+  const id = req.params.lotus_id;
+  const ctx = await loadLotusContext(id, 20);
+  if (!ctx) return res.status(404).json({ success: false, message: 'not found' });
+  if (!ctx.messages.length) return res.status(400).json({ success: false, message: 'belum ada pesan' });
+
+  const lastInbound = [...ctx.messages].reverse().find((m) => m.sender_type === 'customer');
+  const inboundBody = (lastInbound?.body || '').slice(0, 1000);
+  const t0 = Date.now();
+
+  let caseItems = [];
+  let lowConfidence = false;
+  try {
+    const r = await caseLibrary.lookup({ inboundBody, intent: null });
+    caseItems = r.items || [];
+    lowConfidence = !!r.lowConfidence;
+  } catch (e) {
+    logger.warn({ err: e.message }, '[lotus.suggestions] caseLibrary failed');
+  }
+
+  const fakeConv = {
+    id: 0, phone: ctx.contact.cust_number, push_name: ctx.contact.cust_name,
+    customer_id: null, wa_session: 'lotus', shadow_mode: false,
+  };
+  let sys = '';
+  try {
+    const baseSystem = await persona.buildSystemPrompt({
+      conv: fakeConv, customerName: ctx.contact.cust_name, cityHint: ctx.contact.city_name || null,
+    });
+    sys = `${baseSystem}\n\n=== MODE: OPERATOR ASSIST (LOTUS) ===\nOperator manusia handle chat ini. JANGAN pakai tool. Output HANYA teks balasan, tanpa preamble.`;
+  } catch { /* ignore */ }
+
+  const turns = ctx.messages.slice(-5).map((m) => {
+    const who = m.sender_type === 'customer' ? 'Customer'
+      : m.sender_type === 'staff' ? 'Operator' : 'Tiara';
+    return `${who}: ${(m.body || `[${m.message_type}]`).slice(0, 300)}`;
+  }).join('\n');
+  const casesBlock = caseItems.map((c, i) => `${i + 1}. ${c.body}`).join('\n') || '(belum ada saran case)';
+  const aiPrompt = `Customer message terbaru: "${inboundBody || '(tidak ada teks)'}"
+Last 5 turns:
+${turns}
+
+Saran case library:
+${casesBlock}
+
+Tugas: tulis 1 reply ALTERNATIF — synthesize/improve dari saran di atas dengan persona Tiara.
+Constraint:
+- Bahasa Indonesia santai-sopan, sapaan "Kak"
+- 1-3 kalimat, max 200 kata
+- Tambah CTA bila relevan
+- Output: HANYA text reply, tanpa preamble/quote/label.`;
+
+  const AI_TIMEOUT_MS = parseInt(process.env.COPILOT_AI_TIMEOUT_MS) || 6000;
+  let aiText = null;
+  let aiErr = null;
+  const ta = Date.now();
+  try {
+    const resp = await Promise.race([
+      aiClient.complete({
+        system: sys,
+        messages: [{ role: 'user', content: aiPrompt }],
+        max_tokens: 400, temperature: 0.4,
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('ai_timeout')), AI_TIMEOUT_MS)),
+    ]);
+    aiText = (resp?.text || '').trim() || null;
+  } catch (e) {
+    aiErr = e.message;
+    logger.warn({ err: e.message, lotusId: id }, '[lotus.suggestions] ai failed');
+  }
+  const aiMs = Date.now() - ta;
+
+  const options = caseItems.slice(0, 3).map((c, i) => ({
+    rank: i + 1,
+    source: 'case',
+    case_label: c.case_label,
+    text: c.body,
+    confidence: lowConfidence ? 'low' : 'normal',
+  }));
+  while (options.length < 3) {
+    options.push({
+      rank: options.length + 1, source: 'fallback',
+      text: 'Halo Kak, boleh dijelaskan lebih lanjut kebutuhannya supaya Tiara bantu lebih akurat ya?',
+      confidence: 'low',
+    });
+  }
+  options.push({
+    rank: 4,
+    source: aiText ? 'ai' : 'fallback',
+    text: aiText || 'Tidak ada usulan AI — gunakan opsi 1-3 atau ketik manual.',
+    confidence: aiText ? (lowConfidence ? 'low' : 'normal') : 'low',
+    ai_ms: aiMs, ai_error: aiErr,
+  });
+
+  res.json({
+    success: true,
+    options,
+    generation_ms: Date.now() - t0,
+    low_confidence: lowConfidence,
+    inbound_preview: inboundBody.slice(0, 120),
+  });
+});
+
 router.post('/contacts/:lotus_id/ai-summary', async (req, res) => {
   const id = req.params.lotus_id;
+  const force = !!(req.body && req.body.force);
   const ctx = await loadLotusContext(id, 60);
   if (!ctx) return res.status(404).json({ success: false, message: 'not found' });
   if (!ctx.messages.length) return res.status(400).json({ success: false, message: 'belum ada pesan' });
+
+  // Cache check — skip kalau sudah ada summary & tidak ada pesan baru
+  if (!force) {
+    const cached = await pg.query(
+      `SELECT ai_summary, ai_summary_msg_count, ai_summary_generated_at
+         FROM crm_lotus_state WHERE lotus_id = $1 LIMIT 1`,
+      [id]
+    );
+    const c = cached.rows[0];
+    const lastMsgAt = ctx.messages[ctx.messages.length - 1]?.received_at || ctx.messages[ctx.messages.length - 1]?.created_at;
+    if (c && c.ai_summary && c.ai_summary_generated_at && lastMsgAt &&
+        new Date(c.ai_summary_generated_at) >= new Date(lastMsgAt)) {
+      return res.json({
+        success: true,
+        summary: c.ai_summary,
+        message_count: c.ai_summary_msg_count || ctx.messages.length,
+        generated_at: c.ai_summary_generated_at,
+        source: 'cached',
+      });
+    }
+  }
 
   const transcript = ctx.messages.map((m) => {
     const who = m.sender_type === 'customer' ? 'Customer'
@@ -712,34 +931,114 @@ router.post('/contacts/:lotus_id/ai-summary', async (req, res) => {
     return `${who}: ${(m.body || `[${m.message_type}]`).slice(0, 300)}`;
   }).join('\n');
 
-  const systemPrompt = `Kamu asisten yang bantu operator CS Prestisa cepat catch-up percakapan WhatsApp (data dari Lotus).`;
-  const userMsg = `Ringkas percakapan berikut dalam Bahasa Indonesia. Format:
+  const systemPrompt = `Kamu analyst CS/Sales Prestisa. Tugasmu menganalisis percakapan WhatsApp (data dari Lotus) dan menghasilkan ringkasan tajam untuk operator + manajer sales. Bahasa Indonesia, ringkas, berbasis bukti dari transkrip. Jangan mengarang fakta — kalau data tidak ada, tulis "Tidak ditemukan".`;
+  const userMsg = `Analisa percakapan berikut. Output WAJIB pakai 4 section persis di bawah ini, dengan heading tebal seperti format ini:
 
-**Ringkasan:** 2-3 kalimat tentang situasinya.
-**Kebutuhan customer:** apa yang dia minta / butuhkan.
-**Status:** sudah diselesaikan / butuh tindakan operator / menunggu customer.
-**Action item:** kalau ada, list 1-3 hal yang perlu operator lakukan selanjutnya.
+## A. 5 Why (Root Cause Analysis)
+**Why 1 — Alasan Customer Tidak Membeli / Hambatan Utama:** apa alasan langsung yang disampaikan atau terlihat di transkrip.
+**Why 2 — Penyebab Alasan Tersebut Muncul:** kenapa alasan itu muncul (mis. pembanding harga, ekspektasi, pengalaman sebelumnya).
+**Why 3 — Kelemahan pada Penawaran atau Handling:** kenapa customer memilih alternatif / ragu — fokus ke gap di penawaran sales.
+**Why 4 — Penyebab pada Proses atau Sistem:** kenapa sales tidak menutup gap itu (template, SOP, info produk, tools).
+**Why 5 — Akar Masalah Manajerial:** kenapa proses/sistem itu belum tersedia / tidak dijalankan.
+**Root Cause:** 1-2 kalimat akar masalah sebenarnya (bukan gejala permukaan).
+**Corrective Action:** 1-2 kalimat tindakan korektif sistemik (bukan sekadar follow-up customer ini).
+
+## B. POV Customer
+**Kebutuhan inti:** apa yang sebenarnya customer cari.
+**Sentiment emosional:** netral / antusias / frustrasi / kecewa — sebut tone-nya.
+**Kepuasan terhadap handling sales:** emoji (😊 / 😐 / 😞) + 1 kalimat alasan + contoh quote singkat dari transkrip.
+**Urgency:** santai / normal / mendesak — sebutkan sinyalnya.
+**Pain point / keraguan:** hal yang bikin customer ragu atau tidak nyaman.
+**Ekspektasi tidak terpenuhi:** apa yang customer harapkan tapi tidak dapat (tulis "Tidak ditemukan" kalau tidak ada).
+
+## C. POV Kinerja Sales
+### ✅ Yang Sudah Baik (Good)
+List 1-3 poin. Tiap poin: nama aspek + 1 kalimat penjelasan + 1 contoh quote dari transkrip. Tulis "Tidak ditemukan" kalau memang tidak ada.
+
+### ❌ Problem yang Teridentifikasi (Problem)
+List 1-4 poin. Evaluasi minimal dimensi ini bila relevan: response speed, kelengkapan info produk/harga, empathy & active listening, closing skill / CTA, akurasi info. Tiap poin: nama aspek + 1 kalimat penjelasan + 1 contoh konkret dari transkrip.
+
+## D. Action To Do
+**Status percakapan:** sudah selesai / butuh tindakan operator / menunggu customer.
+**Risk assessment:** churn (low/med/high) + potensi closing (low/med/high), masing-masing 1 alasan singkat.
+**Next action prioritas (1-3 item):** format \`[P1] judul: detail — deadline\`.
+**Coaching note untuk sales:** 1-2 kalimat tips spesifik berbasis observasi di transkrip ini.
+**Pola yang perlu di-monitor:** pola berulang yang sebaiknya manajer pantau ke depan.
+
+Aturan:
+- Jangan tambah section lain di luar A–D.
+- Pakai bukti dari transkrip (quote singkat) bila relevan.
+- Kalau info kurang untuk suatu poin, tulis "Tidak ditemukan" — jangan mengarang.
+
+---
+
+${taxonomyPromptInstruction()}
 
 Transkrip (${ctx.messages.length} pesan):
 ${transcript}`;
 
+  // AI Summary pakai Gemini 2.5 Flash (gratis tier) — hemat token vs Claude.
+  // Reply generation tetap pakai provider aktif (Claude default).
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) {
+    return res.status(500).json({ success: false, message: 'GEMINI_API_KEY belum di-set' });
+  }
+
   try {
-    const llm = await aiClient.generateWithTools({
-      systemPrompt, messages: [{ role: 'user', content: userMsg }],
-      tools: [], executor: () => ({}), maxIterations: 1,
-    });
-    const summary = (llm.text || '').trim();
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(geminiKey);
+
+    let llmText = '';
+    let usage = null;
+    const tryModel = async (modelName) => {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: systemPrompt,
+        generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+      });
+      const r = await model.generateContent(userMsg);
+      const u = r.response.usageMetadata || {};
+      return {
+        text: r.response.text().trim(),
+        usage: { input_tokens: u.promptTokenCount || 0, output_tokens: u.candidatesTokenCount || 0 },
+      };
+    };
+
+    try {
+      const out = await tryModel('gemini-2.5-flash');
+      llmText = out.text; usage = out.usage;
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('429') || msg.includes('503')) {
+        await new Promise(r => setTimeout(r, 3000));
+        const out = await tryModel('gemini-2.5-flash-lite');
+        llmText = out.text; usage = out.usage;
+      } else throw err;
+    }
+
+    const parsed = parseRootCauseFromSummary(llmText);
+    const summary = parsed.summary;
+    const rootCauseTag = parsed.tag;
+    const rootCauseConfidence = parsed.confidence;
     await ensureState(id, ctx.contact.cust_number);
     await pg.query(
       `UPDATE crm_lotus_state
-         SET ai_summary = $2, ai_summary_msg_count = $3, ai_summary_generated_at = now(),
+         SET ai_summary = $2,
+             ai_summary_msg_count = $3,
+             ai_summary_generated_at = now(),
+             root_cause_tag = $4,
+             root_cause_confidence = $5,
+             root_cause_tagged_at = CASE WHEN $4 IS NOT NULL THEN now() ELSE root_cause_tagged_at END,
              updated_at = now()
        WHERE lotus_id = $1`,
-      [id, summary, ctx.messages.length]
+      [id, summary, ctx.messages.length, rootCauseTag, rootCauseConfidence]
     );
     res.json({
       success: true, summary, message_count: ctx.messages.length,
-      generated_at: new Date().toISOString(), usage: llm.usage,
+      generated_at: new Date().toISOString(),
+      source: 'gemini-2.5-flash', usage,
+      root_cause_tag: rootCauseTag,
+      root_cause_confidence: rootCauseConfidence,
     });
   } catch (err) {
     logger.error({ err: err.message, lotusId: id }, '[lotus.ai-summary] failed');
@@ -815,14 +1114,16 @@ router.post('/contacts/:lotus_id/send-template', async (req, res) => {
 
   // Mirror to lotus.messages
   const msgLotusId = sent.id ? `vonage:${sent.id}` : `crm:tpl:${Date.now()}:${Math.random().toString(36).slice(2,8)}`;
+  let insertedRowId = null;
   try {
-    await lotus.query(
+    const { rows: ins } = await lotus.query(
       `INSERT INTO messages
          (lotus_id, message_id, direction, cust_number, cust_name, business_number,
           channel, message_type, body, hsm_name, received_at, created_at, cs_id, cs_name, raw_doc, ingested_at)
        VALUES ($1, $2, 'outbound', $3, $4, $5, 'whatsapp', 'template', $6, $7, now(), now(),
                $8, $9, $10::jsonb, now())
-       ON CONFLICT (lotus_id) DO NOTHING`,
+       ON CONFLICT (lotus_id) DO NOTHING
+       RETURNING id`,
       [
         msgLotusId, sent.id || null, c.cust_number, c.cust_name, c.business_number,
         rendered, templateName, req.staff.staff_id,
@@ -830,9 +1131,23 @@ router.post('/contacts/:lotus_id/send-template', async (req, res) => {
         JSON.stringify({ source: 'salesai_crm', template: templateName, params, vonage: sent.raw || null }),
       ]
     );
+    insertedRowId = ins[0]?.id || null;
   } catch (err) {
     logger.warn({ err: err.message }, '[lotusInbox.send-template] lotus insert failed');
   }
+
+  // Notify Lotus app webhook (best-effort, non-blocking)
+  lotusWebhook.saveMessage({
+    from: senderFrom,
+    to: c.cust_number,
+    messageId: sent.id || '',
+    messageText: rendered,
+    contactName: c.cust_name || 'Customer',
+    hsmName: templateName,
+    fileName: tpl.header_image ? (tpl.header_image.split('/').pop() || 'header') : '',
+    fileUrl: tpl.header_image || '',
+    isHsm: true,
+  }).catch(() => {});
 
   // Bump first_response_at
   await ensureState(id, c.cust_number);
@@ -847,7 +1162,8 @@ router.post('/contacts/:lotus_id/send-template', async (req, res) => {
     io.to(`crm:lotus:${id}`).emit('crm:lotus-message', {
       lotus_id: id,
       message: {
-        id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        id: insertedRowId,
+        message_id: sent.id || null,
         direction: 'out', sender_type: 'staff',
         staff_name: req.staff.full_name || req.staff.username || null,
         body: rendered, message_type: 'template',
