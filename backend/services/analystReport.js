@@ -89,4 +89,74 @@ async function runTierA({ transcript, msgCount, inboundCount, geminiKey }) {
   };
 }
 
-module.exports = { runTierA, buildTierAUserPrompt, TIER_A_SYSTEM };
+const TIER_B_SYSTEM = `Kamu adalah Sales Performance Analyst untuk Prestisa.
+Tugasmu: tulis deep analysis untuk satu lead lost — manager akan baca untuk coaching sales dan perbaikan SOP.
+Bahasa Indonesia profesional, ringkas, tajam (bukan deskriptif). Berbasis bukti dari transkrip. Jangan mengarang.`;
+
+function buildTierBUserPrompt({ tierA, transcript, msgCount }) {
+  const gaps = tierA.sales_handling
+    ? Object.entries(tierA.sales_handling).filter(([, v]) => v === false).map(([k]) => k).join(', ')
+    : '';
+  return `Konteks struktur (Tier A sudah validated):
+- Customer Reason: ${tierA.customer_reason || '—'}
+- Internal Root Cause: ${(tierA.internal_root_cause_categories || []).join(', ') || '—'}
+- Funnel Stage Lost: ${tierA.funnel_stage_lost || '—'}
+- Controllability: ${tierA.controllability || '—'}
+- Sales Handling Gap: ${gaps || 'tidak ada gap signifikan'}
+
+Tulis output markdown PERSIS dengan section berikut:
+
+## Problem Statement
+1-2 kalimat masalah spesifik lead ini (bukan generik).
+
+## 5 Why Analysis
+**Why 1 — Alasan customer tidak membeli:** ...
+**Why 2 — Penyebab alasan tsb muncul:** ...
+**Why 3 — Kelemahan handling sales:** ...
+**Why 4 — Penyebab di proses/sistem:** ...
+**Why 5 — Akar masalah manajerial:** ...
+
+## Root Cause
+1-2 kalimat akar masalah sebenarnya, bukan gejala permukaan.
+
+## Corrective Action
+Tindakan korektif **sistemik** (SOP, template, training, playbook). Bukan sekedar follow-up customer ini.
+
+## Next Best Action
+1-3 langkah konkret untuk lead ini kalau masih bisa diselamatkan. Format: \`[Pn] aksi — alasan singkat\`.
+
+## Manager Note
+1-2 kalimat catatan untuk supervisor: pola coaching atau monitoring yang perlu ditindaklanjuti.
+
+Aturan:
+- Maksimal 600 kata total.
+- Pakai quote pendek dari transkrip untuk bukti (sebut "Customer:" atau "Sales:").
+- Kalau bukti tidak cukup untuk salah satu Why, tulis "Bukti tidak cukup di transkrip" — jangan paksa-isi.
+
+Transkrip (${msgCount} pesan):
+${transcript}`;
+}
+
+async function runTierB({ tierA, transcript, msgCount, geminiKey }) {
+  const genAI = new GoogleGenerativeAI(geminiKey);
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction: TIER_B_SYSTEM,
+    generationConfig: {
+      temperature: 0.4,
+      maxOutputTokens: 2048,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  });
+  const prompt = buildTierBUserPrompt({ tierA, transcript, msgCount });
+  const t0 = Date.now();
+  const r = await model.generateContent(prompt);
+  const u = r.response.usageMetadata || {};
+  return {
+    markdown: r.response.text().trim(),
+    usage: { input_tokens: u.promptTokenCount || 0, output_tokens: u.candidatesTokenCount || 0 },
+    duration_ms: Date.now() - t0,
+  };
+}
+
+module.exports = { runTierA, runTierB, buildTierAUserPrompt, buildTierBUserPrompt, TIER_A_SYSTEM, TIER_B_SYSTEM };
