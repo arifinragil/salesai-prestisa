@@ -1026,9 +1026,9 @@ ${transcript}`;
          SET ai_summary = $2,
              ai_summary_msg_count = $3,
              ai_summary_generated_at = now(),
-             root_cause_tag = $4,
-             root_cause_confidence = $5,
-             root_cause_tagged_at = CASE WHEN $4 IS NOT NULL THEN now() ELSE root_cause_tagged_at END,
+             root_cause_tag = $4::text,
+             root_cause_confidence = $5::numeric,
+             root_cause_tagged_at = CASE WHEN $4::text IS NOT NULL THEN now() ELSE root_cause_tagged_at END,
              updated_at = now()
        WHERE lotus_id = $1`,
       [id, summary, ctx.messages.length, rootCauseTag, rootCauseConfidence]
