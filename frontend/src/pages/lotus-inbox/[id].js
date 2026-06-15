@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import { api, fetcher } from '@/lib/api';
+import ManagerViewTab from '../../components/lotus-inbox/managerView/ManagerViewTab';
 import { useSocket } from '@/lib/useSocket';
 import { formatRelative, formatPhone } from '@/lib/format';
 
@@ -36,8 +37,18 @@ export default function LotusConvDetail() {
   const [suggesting, setSuggesting] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [summary, setSummary]     = useState(null);
+  // Co-Pilot 4-option suggestions
+  const [sugBusy, setSugBusy]     = useState(false);
+  const [sugData, setSugData]     = useState(null); // { options, generation_ms, low_confidence }
+  const [sugCollapsed, setSugCollapsed] = useState(false);
   // Profile drawer (mobile)
   const [profileOpen, setProfileOpen] = useState(false);
+  // Tab strip: 'chat' (default) or 'manager_view'
+  const [tab, setTab] = useState('chat');
+  useEffect(() => {
+    if (router.query.tab === 'manager_view') setTab('manager_view');
+    else if (router.query.tab === 'chat') setTab('chat');
+  }, [router.query.tab]);
   // Order detail modal (foto hasil + lokasi)
   const [orderDetailId, setOrderDetailId] = useState(null);
   const orderDetail = useSWR(
@@ -60,6 +71,7 @@ export default function LotusConvDetail() {
     if (lastIdRef.current === id) return;
     lastIdRef.current = id;
     setMessages([]); setCursor(null); setHasMore(true); setMsgsErr(null);
+    setSugData(null); setSugCollapsed(false); setSummary(null);
     let cancelled = false;
     (async () => {
       try {
@@ -274,6 +286,17 @@ export default function LotusConvDetail() {
     } catch (e) { setErr(e.message); }
     finally { setSuggesting(false); }
   }
+  async function genSuggestions() {
+    if (sugBusy) return;
+    setSugBusy(true); setErr('');
+    try {
+      const r = await api(`/api/lotus-inbox/contacts/${encId}/ai-suggestions`, { method: 'POST', body: {} });
+      setSugData(r);
+      setSugCollapsed(false);
+    } catch (e) { setErr(e.message); }
+    finally { setSugBusy(false); }
+  }
+  function useSuggestion(opt) { setDraft(opt.text); }
   async function doSummary() {
     setSummarizing(true); setErr('');
     try {
@@ -333,7 +356,7 @@ export default function LotusConvDetail() {
 
   return (
     <Layout title={contact?.cust_name || 'Lotus'}>
-      <div className="flex flex-col lg:grid lg:grid-cols-[1fr,320px] gap-0 lg:gap-3 lg:p-3 lg:max-w-7xl lg:mx-auto h-[calc(100dvh-49px-72px)] lg:h-[calc(100vh-120px)] relative">
+<div className="flex flex-col lg:grid lg:grid-cols-[1fr,320px] gap-0 lg:gap-3 lg:p-3 lg:max-w-7xl lg:mx-auto h-[calc(100dvh-49px-72px)] lg:h-full relative">
         {/* Chat panel */}
         <div className="flex flex-col bg-white lg:rounded-lg lg:border lg:border-slate-200 overflow-hidden flex-1 min-h-0">
           {/* Header */}
@@ -356,8 +379,13 @@ export default function LotusConvDetail() {
                 style={{ background: `linear-gradient(135deg, hsl(${avatarHue} 70% 55%), hsl(${(avatarHue + 40) % 360} 75% 60%))` }}
               >{initial}</div>
               <div className="min-w-0 flex-1">
-                <div className="font-semibold text-slate-800 text-[13px] leading-tight truncate">
+<div className="font-semibold text-slate-800 text-[13px] leading-tight truncate">
                   {contact?.cust_name || formatPhone(contact?.cust_number)}
+                  {contact?.lotus_assigned_to && (
+                    <span className="ml-1.5 text-[11px] font-normal text-violet-600">
+                      — sales: {contact.lotus_assigned_to}
+                    </span>
+                  )}
                 </div>
                 <div className="text-[10px] text-slate-500 truncate leading-tight mt-0.5 flex items-center gap-1">
                   <span className={windowOpen ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
@@ -389,7 +417,27 @@ export default function LotusConvDetail() {
             </button>
           </div>
 
-          <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-2.5 py-2 space-y-1.5 bg-slate-50">
+          {/* Tab strip */}
+          <div className="flex border-b border-slate-200 bg-white text-xs">
+            <button
+              type="button"
+              onClick={() => setTab('chat')}
+              className={`px-3 py-2 ${tab === 'chat' ? 'border-b-2 border-violet-600 text-violet-700 font-semibold' : 'text-slate-500 hover:text-slate-700'}`}
+            >💬 Chat</button>
+            <button
+              type="button"
+              onClick={() => setTab('manager_view')}
+              className={`px-3 py-2 ${tab === 'manager_view' ? 'border-b-2 border-violet-600 text-violet-700 font-semibold' : 'text-slate-500 hover:text-slate-700'}`}
+            >🎯 Manager View</button>
+          </div>
+
+          {tab === 'manager_view' && (
+            <div className="flex-1 overflow-y-auto bg-slate-50">
+              <ManagerViewTab lotusId={id} />
+            </div>
+          )}
+
+          <div style={tab === 'chat' ? undefined : { display: 'none' }} ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-2.5 py-2 space-y-1.5 bg-slate-50">
             {hasMore && (
               <div className="text-center py-1.5">
                 <button
@@ -523,6 +571,61 @@ export default function LotusConvDetail() {
             })}
           </div>
 
+          {tab === 'chat' && (<>
+          {/* Co-Pilot 4-option suggestion panel */}
+          <div className="border-t border-slate-200 bg-slate-50">
+            {!sugData ? (
+              <div className="px-3 py-2 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-slate-500">🤖 Co-Pilot — 4 saran balasan (3 case library + 1 AI)</span>
+                <button
+                  type="button"
+                  onClick={genSuggestions}
+                  disabled={sugBusy}
+                  className="text-[11px] px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                >{sugBusy ? 'Generating…' : '✨ Generate'}</button>
+              </div>
+            ) : (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setSugCollapsed(!sugCollapsed)}
+                  className="w-full px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-600 hover:bg-slate-100"
+                >
+                  <span>🤖 Co-Pilot · {sugData.options?.length || 0} suggestion · {sugData.generation_ms}ms{sugData.low_confidence ? ' · ⚠ low conf' : ''}</span>
+                  <span>{sugCollapsed ? '▾' : '▴'}</span>
+                </button>
+                {!sugCollapsed && (
+                  <div className="px-2.5 pb-2 space-y-1.5">
+                    {(sugData.options || []).map((o) => (
+                      <div key={o.rank} className="bg-white border border-slate-200 rounded p-1.5 hover:border-emerald-400">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px] font-medium text-slate-500">
+                            {o.rank}️⃣ {o.source === 'ai' ? '✨ AI' : o.source === 'fallback' ? '↩️ fallback' : (o.case_label || 'case')}
+                            {o.confidence === 'low' && <span className="ml-1 text-amber-600">·low</span>}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => useSuggestion(o)}
+                            className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                          >Use [{o.rank}]</button>
+                        </div>
+                        <div className="text-[12px] text-slate-800 whitespace-pre-wrap leading-snug">{o.text}</div>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={genSuggestions}
+                        disabled={sugBusy}
+                        className="text-[10px] px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-100 disabled:opacity-40"
+                      >🔄 Regenerate</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="border-t border-slate-200 px-2.5 py-2 space-y-1.5">
             {!windowOpen && (
               <div className="text-[11px] bg-amber-50 text-amber-800 border border-amber-200 rounded px-2 py-1 flex items-center justify-between gap-2">
@@ -606,6 +709,7 @@ export default function LotusConvDetail() {
               </div>
             </div>
           </div>
+          </>)}
         </div>
 
         {/* Order detail modal — purchase_order list + images */}
@@ -928,10 +1032,11 @@ export default function LotusConvDetail() {
         )}
 
         {/* Sidebar (in-place on lg, slide-over on mobile) */}
-        <div
+<div
           className={`
             space-y-3 overflow-y-auto bg-slate-50
             lg:static lg:translate-x-0 lg:bg-transparent lg:block lg:max-w-none lg:w-auto
+            lg:min-h-0 lg:h-full
             fixed top-0 right-0 bottom-0 z-40 w-[88vw] max-w-[360px] shadow-2xl
             transition-transform duration-200 ease-out
             ${profileOpen ? 'translate-x-0' : 'translate-x-full'}
