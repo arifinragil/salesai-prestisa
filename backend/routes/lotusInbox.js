@@ -1411,4 +1411,120 @@ router.get('/orders/:order_id/details', async (req, res) => {
   }
 });
 
+const { runTierA } = require('../services/analystReport');
+
+// POST /api/lotus-inbox/contacts/:lotus_id/analyst-report
+// Body: { force?: boolean, tier?: 'A' | 'B' }
+router.post('/contacts/:lotus_id/analyst-report', async (req, res) => {
+  const id = req.params.lotus_id;
+  const force = !!(req.body && req.body.force);
+  const tier = (req.body && req.body.tier) || 'A';
+  if (tier !== 'A' && tier !== 'B') return res.status(400).json({ success: false, code: 'INVALID_TIER' });
+
+  const ctx = await loadLotusContext(id, 100);
+  if (!ctx) return res.status(404).json({ success: false, message: 'not found' });
+  if (!ctx.messages.length) return res.status(400).json({ success: false, message: 'belum ada pesan' });
+
+  const inboundCount = ctx.messages.filter(m => m.sender_type === 'customer').length;
+  if (tier === 'A' && inboundCount < 4) {
+    return res.status(400).json({ success: false, code: 'INBOUND_TOO_LOW', inbound_count: inboundCount, threshold: 4 });
+  }
+
+  // Tier A cache check
+  if (tier === 'A' && !force) {
+    const c = (await pg.query(
+      `SELECT lead_status, funnel_stage_lost, customer_intent, no_response_after, controllability,
+              decision_maker, internal_root_cause_categories, sales_handling, product_solution_fit,
+              confidence_v2, evidence_quote, root_cause_tag,
+              analyst_report_generated_at, analyst_report_msg_count, analyst_summary_md, analyst_summary_generated_at
+         FROM crm_lotus_state WHERE lotus_id = $1`,
+      [id]
+    )).rows[0];
+    if (c && c.analyst_report_generated_at && c.analyst_report_msg_count >= ctx.messages.length) {
+      return res.json({
+        success: true, source: 'cached', tier: 'A',
+        inbound_count: inboundCount, message_count: ctx.messages.length,
+        structured: {
+          customer_reason: c.root_cause_tag,
+          lead_status: c.lead_status, funnel_stage_lost: c.funnel_stage_lost,
+          customer_intent: c.customer_intent, no_response_after: c.no_response_after,
+          controllability: c.controllability, decision_maker: c.decision_maker,
+          internal_root_cause_categories: c.internal_root_cause_categories || [],
+          sales_handling: c.sales_handling, product_solution_fit: c.product_solution_fit,
+          confidence: c.confidence_v2, evidence_quote: c.evidence_quote,
+        },
+        summary_md: c.analyst_summary_md || null,
+        summary_generated_at: c.analyst_summary_generated_at,
+        generated_at: c.analyst_report_generated_at,
+      });
+    }
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) return res.status(500).json({ success: false, message: 'GEMINI_API_KEY belum di-set' });
+
+  const transcript = ctx.messages.map(m => {
+    const who = m.sender_type === 'customer' ? 'Customer'
+      : m.sender_type === 'staff' ? 'Operator' : 'Tiara';
+    return `${who}: ${(m.body || `[${m.message_type}]`).slice(0, 300)}`;
+  }).join('\n');
+
+  if (tier === 'A') {
+    try {
+      const { validated, usage, duration_ms } = await runTierA({
+        transcript, msgCount: ctx.messages.length, inboundCount, geminiKey
+      });
+
+      await pg.query(
+        `INSERT INTO crm_lotus_state (lotus_id, root_cause_tag,
+            lead_status, funnel_stage_lost, customer_intent, no_response_after,
+            controllability, decision_maker, internal_root_cause_categories,
+            sales_handling, product_solution_fit, confidence_v2, evidence_quote,
+            analyst_report_generated_at, analyst_report_msg_count, root_cause_tagged_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now(), $14, now())
+         ON CONFLICT (lotus_id) DO UPDATE SET
+            root_cause_tag                 = EXCLUDED.root_cause_tag,
+            lead_status                    = EXCLUDED.lead_status,
+            funnel_stage_lost              = EXCLUDED.funnel_stage_lost,
+            customer_intent                = EXCLUDED.customer_intent,
+            no_response_after              = EXCLUDED.no_response_after,
+            controllability                = EXCLUDED.controllability,
+            decision_maker                 = EXCLUDED.decision_maker,
+            internal_root_cause_categories = EXCLUDED.internal_root_cause_categories,
+            sales_handling                 = EXCLUDED.sales_handling,
+            product_solution_fit           = EXCLUDED.product_solution_fit,
+            confidence_v2                  = EXCLUDED.confidence_v2,
+            evidence_quote                 = EXCLUDED.evidence_quote,
+            analyst_report_generated_at    = now(),
+            analyst_report_msg_count       = EXCLUDED.analyst_report_msg_count,
+            root_cause_tagged_at           = now()`,
+        [
+          id, validated.customer_reason,
+          validated.lead_status, validated.funnel_stage_lost, validated.customer_intent, validated.no_response_after,
+          validated.controllability, validated.decision_maker, validated.internal_root_cause_categories,
+          validated.sales_handling, validated.product_solution_fit, validated.confidence, validated.evidence_quote,
+          ctx.messages.length,
+        ]
+      );
+      logger.info({ lotus_id: id, tier: 'A', msg_count: ctx.messages.length, inbound_count: inboundCount,
+                    tokens_in: usage.input_tokens, tokens_out: usage.output_tokens, duration_ms, source: 'fresh' },
+                  '[analyst.report]');
+      return res.json({
+        success: true, source: 'fresh', tier: 'A',
+        inbound_count: inboundCount, message_count: ctx.messages.length,
+        structured: { ...validated, customer_reason: validated.customer_reason },
+        summary_md: null,
+        confidence: validated.confidence,
+        generated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      logger.error({ err: e.message, lotus_id: id, tier: 'A' }, '[analyst.report] failed');
+      return res.status(500).json({ success: false, message: e.message });
+    }
+  }
+
+  // Tier B handled in Task 6
+  return res.status(501).json({ success: false, message: 'Tier B not yet implemented' });
+});
+
 module.exports = router;
