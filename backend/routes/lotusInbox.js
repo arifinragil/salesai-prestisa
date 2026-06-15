@@ -1523,8 +1523,60 @@ router.post('/contacts/:lotus_id/analyst-report', async (req, res) => {
     }
   }
 
-  // Tier B handled in Task 6
-  return res.status(501).json({ success: false, message: 'Tier B not yet implemented' });
+  // Tier B
+  if (inboundCount < 5) {
+    return res.status(400).json({ success: false, code: 'INBOUND_TOO_LOW_FOR_TIER_B', inbound_count: inboundCount, threshold: 5 });
+  }
+  const stateRow = (await pg.query(
+    `SELECT lead_status, funnel_stage_lost, customer_intent, no_response_after, controllability,
+            decision_maker, internal_root_cause_categories, sales_handling, product_solution_fit,
+            confidence_v2, evidence_quote, root_cause_tag,
+            analyst_report_generated_at, analyst_report_msg_count, analyst_summary_md, analyst_summary_generated_at
+       FROM crm_lotus_state WHERE lotus_id = $1`,
+    [id]
+  )).rows[0];
+  if (!stateRow || !stateRow.analyst_report_generated_at) {
+    return res.status(400).json({ success: false, code: 'TIER_A_MISSING', message: 'Generate Tier A dulu sebelum Tier B' });
+  }
+  if (!force && stateRow.analyst_summary_md && stateRow.analyst_report_msg_count >= ctx.messages.length) {
+    return res.json({
+      success: true, source: 'cached', tier: 'B',
+      inbound_count: inboundCount, message_count: ctx.messages.length,
+      structured: null,
+      summary_md: stateRow.analyst_summary_md,
+      summary_generated_at: stateRow.analyst_summary_generated_at,
+    });
+  }
+  const tierAContext = {
+    customer_reason: stateRow.root_cause_tag,
+    internal_root_cause_categories: stateRow.internal_root_cause_categories || [],
+    funnel_stage_lost: stateRow.funnel_stage_lost,
+    controllability: stateRow.controllability,
+    sales_handling: stateRow.sales_handling,
+  };
+  try {
+    const { runTierB } = require('../services/analystReport');
+    const { markdown, usage, duration_ms } = await runTierB({
+      tierA: tierAContext, transcript, msgCount: ctx.messages.length, geminiKey,
+    });
+    await pg.query(
+      `UPDATE crm_lotus_state SET analyst_summary_md = $2, analyst_summary_generated_at = now()
+        WHERE lotus_id = $1`,
+      [id, markdown]
+    );
+    logger.info({ lotus_id: id, tier: 'B', msg_count: ctx.messages.length, inbound_count: inboundCount,
+                  tokens_in: usage.input_tokens, tokens_out: usage.output_tokens, duration_ms, source: 'fresh' },
+                '[analyst.report]');
+    return res.json({
+      success: true, source: 'fresh', tier: 'B',
+      inbound_count: inboundCount, message_count: ctx.messages.length,
+      structured: null, summary_md: markdown,
+      summary_generated_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    logger.error({ err: e.message, lotus_id: id, tier: 'B' }, '[analyst.report] failed');
+    return res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 module.exports = router;
