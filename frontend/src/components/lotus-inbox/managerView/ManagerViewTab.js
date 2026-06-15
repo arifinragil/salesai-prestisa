@@ -21,8 +21,11 @@ export default function ManagerViewTab({ lotusId }) {
     } catch (e) {
       const code = e instanceof ApiError ? e.body?.code : undefined;
       const body = e instanceof ApiError ? e.body : null;
+      const status = e instanceof ApiError ? e.status : null;
       if (code === 'INBOUND_TOO_LOW') {
         setErr({ code, msg: `Data tidak cukup (${body.inbound_count} inbound). Tier A butuh ≥4 inbound untuk diagnostic bermakna.` });
+      } else if (status === 404 || body?.message === 'not found') {
+        setErr({ code: 'NOT_FOUND', msg: 'Lead belum di-index. Generate AI Summary di tab kanan dahulu, lalu refresh halaman ini.' });
       } else {
         setErr({ code, msg: body?.message || e.message });
       }
