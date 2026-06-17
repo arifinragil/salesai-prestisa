@@ -5,13 +5,7 @@ const pg = require('../db/postgres');
 const { requireStaff } = require('../middleware/auth');
 
 const router = express.Router();
-// requireStaff is used here for production; in tests req.staff is pre-set by appWith().
-// The admin-role guard below is the primary access control.
-router.use((req, res, next) => {
-  // If req.staff already set (e.g. by Authentik/JWT upstream), skip requireStaff.
-  if (req.staff) return next();
-  return requireStaff(req, res, next);
-});
+router.use(requireStaff);
 router.use((req, res, next) => {
   if (req.staff?.role !== 'admin') return res.status(403).json({ error: 'admin_only' });
   next();

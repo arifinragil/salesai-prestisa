@@ -1,5 +1,6 @@
 // backend/__tests__/supervisorControl.test.js
 jest.mock('../db/postgres');
+jest.mock('../middleware/auth', () => ({ requireStaff: (req, _res, next) => next() }));
 const pg = require('../db/postgres');
 const express = require('express');
 const request = require('supertest');
