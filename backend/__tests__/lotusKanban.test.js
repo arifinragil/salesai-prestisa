@@ -178,3 +178,31 @@ describe('FU overdue (filter + counts)', () => {
     expect(res.body.counts.fu_pending).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe('FU stale (expired bucket)', () => {
+  const dAgo = (d) => new Date(Date.now() - d * 24 * 3600 * 1000).toISOString();
+  test('?tab=fu_stale hanya lead expired (>H+7 tanpa FU)', async () => {
+    stubData(
+      [
+        { lotus_id: 'A', cust_number: '1', last_message_from: 'inbound', last_message_at: dAgo(10), first_inbound_at: dAgo(10) },
+        { lotus_id: 'B', cust_number: '2', last_message_from: 'inbound', last_message_at: dAgo(2),  first_inbound_at: dAgo(2) },
+      ],
+      [
+        { lotus_id: 'A', status: 'active', assigned_staff_id: 7 }, // H+10 no outbound → expired
+        { lotus_id: 'B', status: 'active', assigned_staff_id: 7 }, // H+2 no outbound → overdue
+      ]
+    );
+    const res = await request(appWith(ADMIN)).get('/api/lotus-inbox/contacts?tab=fu_stale');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((i) => i.lotus_id)).toEqual(['A']);
+  });
+
+  test('/tab-counts memuat fu_stale', async () => {
+    stubData(
+      [{ lotus_id: 'A', cust_number: '1', last_message_from: 'inbound', last_message_at: dAgo(10), first_inbound_at: dAgo(10) }],
+      [{ lotus_id: 'A', status: 'active', assigned_staff_id: 7 }]
+    );
+    const res = await request(appWith(ADMIN)).get('/api/lotus-inbox/tab-counts');
+    expect(res.body.counts).toHaveProperty('fu_stale', 1);
+  });
+});

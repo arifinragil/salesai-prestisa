@@ -196,6 +196,8 @@ router.get('/contacts', async (req, res) => {
     // Tab match (all = semua active dalam scope)
     if (tab === 'fu_overdue') {
       if (followupState(it, new Date()).status !== 'overdue') return false;
+    } else if (tab === 'fu_stale') {
+      if (followupState(it, new Date()).status !== 'expired') return false;
     } else if (tab && tab !== 'all' && !tabsForItem(it, new Date()).includes(tab)) {
       return false;
     }
@@ -255,6 +257,7 @@ router.get('/tab-counts', async (req, res) => {
   for (const k of TAB_KEYS) counts[k] = 0;
   counts.fu_overdue = 0;
   counts.fu_pending = 0;
+  counts.fu_stale = 0;
 
   for (const c of contacts) {
     const s = stateMap.get(c.lotus_id) || {};
@@ -278,6 +281,7 @@ router.get('/tab-counts', async (req, res) => {
     const fu = followupState(item, now);
     if (fu.status === 'overdue') counts.fu_overdue += 1;
     else if (fu.status === 'fresh' || fu.status === 'pending') counts.fu_pending += 1;
+    else if (fu.status === 'expired') counts.fu_stale += 1;
   }
 
   res.json({ success: true, counts });
