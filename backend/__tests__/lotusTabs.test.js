@@ -91,6 +91,17 @@ describe('tunggu_cust', () => {
   });
 });
 
+describe('isInbound conventions (CUSTOMER/LOTUS)', () => {
+  test("'CUSTOMER' diperlakukan inbound → bisa urgent", () => {
+    expect(tabsForItem(item({ last_message_from: 'CUSTOMER', last_message_at: minAgo(40) }), NOW)).toContain('urgent');
+  });
+  test("'LOTUS' diperlakukan outbound → bukan urgent, bisa tunggu_cust", () => {
+    const t = tabsForItem(item({ last_message_from: 'LOTUS', last_message_at: minAgo(180) }), NOW);
+    expect(t).not.toContain('urgent');
+    expect(t).toContain('tunggu_cust');
+  });
+});
+
 test('THRESHOLDS & CLOSING_INTENTS terdefinisi', () => {
   expect(THRESHOLDS.URGENT_MIN).toBe(30);
   expect(THRESHOLDS.TUNGGU_BALAS_MAX_MIN).toBe(48 * 60);

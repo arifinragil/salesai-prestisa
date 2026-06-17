@@ -195,11 +195,24 @@ const TAB_KEYS = ['urgent', 'hot_asap', 'customer_baru', 'tunggu_balas', 'mau_cl
 router.get('/tab-counts', async (req, res) => {
   // Pindai lead aktif 14 hari terakhir (cap 1000) lalu hitung per tab.
   const { rows: contacts } = await lotus.query(
-    `SELECT c.lotus_id, c.cust_number, c.last_message_from, c.last_message_at, c.last_inbound_at
-     FROM contacts c
-     WHERE GREATEST(c.last_message_at, c.last_inbound_at) >= now() - interval '14 days'
-     ORDER BY GREATEST(c.last_message_at, c.last_inbound_at) DESC NULLS LAST
-     LIMIT 1000`
+    `WITH recent AS (
+       SELECT c.lotus_id, c.cust_number, c.last_message_from, c.last_message_at, c.last_inbound_at
+       FROM contacts c
+       WHERE GREATEST(c.last_message_at, c.last_inbound_at) >= now() - interval '14 days'
+       ORDER BY GREATEST(c.last_message_at, c.last_inbound_at) DESC NULLS LAST
+       LIMIT 1000
+     )
+     SELECT r.lotus_id, r.cust_number,
+            COALESCE(lm.direction,   r.last_message_from) AS last_message_from,
+            COALESCE(lm.received_at,  r.last_message_at)  AS last_message_at
+     FROM recent r
+     LEFT JOIN LATERAL (
+       SELECT received_at, direction
+       FROM messages m
+       WHERE m.cust_number = r.cust_number
+       ORDER BY received_at DESC NULLS LAST, id DESC
+       LIMIT 1
+     ) lm ON true`
   );
   const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
 

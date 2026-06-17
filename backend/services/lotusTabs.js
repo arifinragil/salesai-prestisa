@@ -15,7 +15,7 @@ const CLOSING_INTENTS = new Set(['order_intent', 'order', 'payment', 'closing', 
 const WIB_OFFSET_MS = 7 * 3600 * 1000;
 
 function asDate(v) { return v instanceof Date ? v : new Date(v); }
-function isInbound(v) { return /^in/i.test(String(v || '')); }
+function isInbound(v) { return /^(in|customer)/i.test(String(v || '')); }
 function minutesSince(now, ts) { return (asDate(now).getTime() - asDate(ts).getTime()) / 60000; }
 
 function startOfTodayWIB(now) {
