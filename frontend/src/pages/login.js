@@ -15,7 +15,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await api('/api/auth/login', { method: 'POST', body: { username, password } });
-      const next = typeof router.query.next === 'string' ? router.query.next : '/inbox';
+      const next = typeof router.query.next === 'string' ? router.query.next : '/lotus-inbox';
       router.replace(next);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Login gagal';

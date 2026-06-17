@@ -8,7 +8,7 @@ export default function Home() {
 
   useEffect(() => {
     if (isLoading) return;
-    if (user) router.replace('/inbox');
+    if (user) router.replace('/lotus-inbox');
     else if (unauthenticated) router.replace('/login');
   }, [user, isLoading, unauthenticated, router]);
 

@@ -135,7 +135,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
                 <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
               </svg>
             </button>
-            <Link href="/inbox" className="font-semibold text-slate-800 truncate text-sm sm:text-base">
+            <Link href="/lotus-inbox" className="font-semibold text-slate-800 truncate text-sm sm:text-base">
               Tiara CRM
             </Link>
           </div>
