@@ -1056,6 +1056,24 @@ router.post('/contacts/:lotus_id/suggestion/:logId/used', async (req, res, next)
   } catch (e) { next(e); }
 });
 
+// POST /contacts/:lotus_id/suggestion/:logId/rate — 👍 feeds Q&A, 👎 flags
+router.post('/contacts/:lotus_id/suggestion/:logId/rate', async (req, res, next) => {
+  try {
+    const { vote, question, answer, note } = req.body || {};
+    if (vote === 'up') {
+      if (question && answer) {
+        await require('../services/qnaRag').upsertQna({ question, answer, source: 'rated', created_by: req.staff.staff_id });
+      }
+      await pg.query(`UPDATE crm_lotus_suggestion_log SET flagged_reason = 'good' WHERE id = $1`, [parseInt(req.params.logId)]).catch(() => {});
+    } else if (vote === 'down') {
+      await pg.query(`UPDATE crm_lotus_suggestion_log SET flagged_reason = 'bad_suggestion', flagged_note = $2 WHERE id = $1`, [parseInt(req.params.logId), note || null]).catch(() => {});
+    } else {
+      return res.status(400).json({ error: 'bad_vote' });
+    }
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 router.post('/contacts/:lotus_id/ai-summary', async (req, res) => {
   const id = req.params.lotus_id;
   const force = !!(req.body && req.body.force);

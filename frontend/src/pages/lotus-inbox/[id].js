@@ -39,8 +39,9 @@ export default function LotusConvDetail() {
   const [summary, setSummary]     = useState(null);
   // Co-Pilot 4-option suggestions
   const [sugBusy, setSugBusy]     = useState(false);
-  const [sugData, setSugData]     = useState(null); // { options, generation_ms, low_confidence }
+  const [sugData, setSugData]     = useState(null); // { options, generation_ms, low_confidence, log_id, inbound_preview }
   const [sugCollapsed, setSugCollapsed] = useState(false);
+  const [sugRated, setSugRated]   = useState({}); // rank → 'up'|'down'
   // Profile drawer (mobile)
   const [profileOpen, setProfileOpen] = useState(false);
   // Tab strip: 'chat' (default) or 'manager_view'
@@ -293,8 +294,23 @@ export default function LotusConvDetail() {
       const r = await api(`/api/lotus-inbox/contacts/${encId}/ai-suggestions`, { method: 'POST', body: {} });
       setSugData(r);
       setSugCollapsed(false);
+      setSugRated({});
     } catch (e) { setErr(e.message); }
     finally { setSugBusy(false); }
+  }
+  async function rateSuggestion(rank, vote, optText) {
+    if (!sugData?.log_id) return;
+    setSugRated((prev) => ({ ...prev, [rank]: vote }));
+    try {
+      await api(`/api/lotus-inbox/contacts/${encId}/suggestion/${sugData.log_id}/rate`, {
+        method: 'POST',
+        body: {
+          vote,
+          question: sugData.inbound_preview || '',
+          answer: optText,
+        },
+      });
+    } catch { /* best-effort */ }
   }
   function useSuggestion(opt) { setDraft(opt.text); }
   async function doSummary() {
@@ -603,11 +619,27 @@ export default function LotusConvDetail() {
                             {o.rank}️⃣ {o.source === 'ai' ? '✨ AI' : o.source === 'fallback' ? '↩️ fallback' : (o.case_label || 'case')}
                             {o.confidence === 'low' && <span className="ml-1 text-amber-600">·low</span>}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => useSuggestion(o)}
-                            className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                          >Use [{o.rank}]</button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              title="Saran bagus — simpan ke Q&A"
+                              disabled={!!sugRated[o.rank]}
+                              onClick={() => rateSuggestion(o.rank, 'up', o.text)}
+                              className={`text-[11px] px-1.5 py-0.5 rounded border transition ${sugRated[o.rank] === 'up' ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-300'} disabled:cursor-default`}
+                            >👍</button>
+                            <button
+                              type="button"
+                              title="Saran kurang tepat"
+                              disabled={!!sugRated[o.rank]}
+                              onClick={() => rateSuggestion(o.rank, 'down', o.text)}
+                              className={`text-[11px] px-1.5 py-0.5 rounded border transition ${sugRated[o.rank] === 'down' ? 'bg-rose-100 border-rose-400 text-rose-700' : 'border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-300'} disabled:cursor-default`}
+                            >👎</button>
+                            <button
+                              type="button"
+                              onClick={() => useSuggestion(o)}
+                              className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                            >Use [{o.rank}]</button>
+                          </div>
                         </div>
                         <div className="text-[12px] text-slate-800 whitespace-pre-wrap leading-snug">{o.text}</div>
                       </div>
