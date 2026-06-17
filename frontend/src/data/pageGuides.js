@@ -15,6 +15,19 @@ const pageGuides = {
     ],
   },
 
+  '/lotus-inbox/[id]': {
+    title: 'Chat Detail Lead',
+    summary:
+      'Percakapan WhatsApp lengkap dengan satu customer, plus alat bantu AI dan aksi untuk menangani lead ini.',
+    tips: [
+      'Balas lewat kolom ketik di bawah. Tombol "Saran AI" memberi beberapa opsi balasan — pakai yang cocok dan beri 👍/👎 untuk melatih AI.',
+      'Buka tab Manager View / Diagnosa untuk analisa AI: root cause, gap sales handling, dan saran tindakan.',
+      'Aksi lead: Assign ke sales, Tutup (close), Snooze, dan kirim file/gambar.',
+      'Window 24 jam: kalau lewat 24 jam sejak pesan terakhir customer, kamu hanya bisa kirim Template/HSM (bukan teks bebas).',
+      'Ringkasan AI merangkum percakapan panjang dengan cepat — klik "Belum ada ringkasan" untuk generate.',
+    ],
+  },
+
   '/supervisor-control': {
     title: 'Supervisor Control Panel',
     summary:

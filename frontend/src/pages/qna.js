@@ -26,7 +26,7 @@ export default function QnaPage() {
 
   if (isLoading) return null;
   if (!user || user.role !== 'admin') {
-    if (typeof window !== 'undefined') router.replace('/inbox');
+    if (typeof window !== 'undefined') router.replace('/lotus-inbox');
     return null;
   }
 
