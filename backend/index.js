@@ -24,9 +24,11 @@ const savedViewsRoutes = require('./routes/savedViews');
 const healthRoutes = require('./routes/health');
 const suggestionsRoutes = require('./routes/suggestions');
 const supervisorRoutes = require('./routes/supervisor');
+const supervisorControlRoutes = require('./routes/supervisorControl');
 const leadDistRoutes = require('./routes/leadDist');
 const retentionRoutes = require('./routes/retention');
 const b2bRoutes = require('./routes/b2b');
+const customerIssuesRoutes = require('./routes/customerIssues');
 
 const aiAgent = require('./services/aiAgent');
 
@@ -68,10 +70,16 @@ app.use('/api/tasks', tasksRoutes);
 app.use('/api/users/me/notifications', notificationsRoutes);
 app.use('/api/saved-views', savedViewsRoutes);
 app.use('/api/supervisor', supervisorRoutes);
+app.use('/api/supervisor-control', supervisorControlRoutes);
 app.use('/api/lead-dist', leadDistRoutes);
 app.use('/api/retention', retentionRoutes);
 app.use('/api/b2b', b2bRoutes);
+app.use('/api/customer-issues', customerIssuesRoutes);
+app.use('/api/tax-requests', require('./routes/taxRequests'));
+app.use('/api/lotus-inbox', require('./routes/lotusInbox'));
+app.use('/api/qna', require('./routes/qna'));
 app.use('/webhook', webhookRoutes);
+app.use('/webhook/vonage', require('./routes/vonageWebhook'));
 app.use(healthRoutes);
 
 app.use((err, _req, res, _next) => {

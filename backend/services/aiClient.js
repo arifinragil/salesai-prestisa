@@ -186,10 +186,13 @@ async function openaiComplete({ apiKey, model, system, messages, max_tokens, tem
 }
 
 async function geminiComplete({ apiKey, model, system, messages, max_tokens, temperature }) {
-  const contents = messages.map((m) => ({
+  let contents = messages.map((m) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
   }));
+  // Gemini requires first content to have role 'user'; drop leading model turns.
+  while (contents.length && contents[0].role !== 'user') contents.shift();
+  if (!contents.length) contents = [{ role: 'user', parts: [{ text: '(no message)' }] }];
   const body = {
     contents,
     generationConfig: { maxOutputTokens: max_tokens, temperature },

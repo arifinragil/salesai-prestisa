@@ -100,6 +100,12 @@ async function generateWithTools({ systemPrompt, messages, tools, executor, maxI
     initialHistory = fullHistory;
     currentTurn = { role: 'user', parts: [{ text: 'lanjutkan' }] };
   }
+  // Gemini requires the first content to be role 'user'. If history starts
+  // with one or more 'model' turns (e.g. lotus thread opens with an outbound
+  // HSM template before any inbound), drop the leading model turns.
+  while (initialHistory.length && initialHistory[0].role !== 'user') {
+    initialHistory.shift();
+  }
 
   const calls = [];
   let usageIn = 0, usageOut = 0;
