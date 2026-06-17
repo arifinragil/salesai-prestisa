@@ -112,6 +112,24 @@ router.get('/wa-sessions', async (_req, res) => {
   res.json({ success: true, items: rows });
 });
 
+// Resolve a WAHA conversation id → its mirrored Lotus id (if any). Used by the
+// legacy /inbox/[id] page to redirect into the Lotus chat. lotus_id is NULL for
+// the ~0.02% of conversations not mirrored from Lotus (those stay on /inbox).
+router.get('/conversations/:id/lotus-id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ success: false, message: 'invalid id' });
+  }
+  const { rows } = await pg.query(
+    `SELECT lotus_id FROM crm_conversations WHERE id = $1`,
+    [id]
+  );
+  if (!rows.length) {
+    return res.status(404).json({ success: false, message: 'conversation not found' });
+  }
+  res.json({ success: true, lotus_id: rows[0].lotus_id || null });
+});
+
 // Proxy WAHA media files (customer-sent images/audio/video) through our
 // backend so the browser can fetch them — WAHA's media URL is private.
 router.get('/waha-media/:session/:filename', async (req, res) => {
@@ -446,7 +464,8 @@ router.get('/conversations/:id/customer', async (req, res) => {
     `SELECT id, phone, real_phone, push_name, customer_id, last_message_at, last_intent,
             handover_count, status, shadow_mode, wa_session,
             pipeline_stage, pipeline_type, deal_value_idr, deal_value_locked,
-            manual_stage_override, lost_reason
+            manual_stage_override, lost_reason,
+            ai_summary, ai_summary_msg_count, ai_summary_generated_at
      FROM crm_conversations WHERE id = $1`, [id]
   );
   const conv = rows[0];
@@ -574,6 +593,9 @@ router.get('/conversations/:id/customer', async (req, res) => {
       id: conv.id, last_intent: conv.last_intent,
       handover_count: conv.handover_count, status: conv.status,
       shadow_mode: conv.shadow_mode, wa_session: conv.wa_session,
+      ai_summary: conv.ai_summary || null,
+      ai_summary_msg_count: conv.ai_summary_msg_count || null,
+      ai_summary_generated_at: conv.ai_summary_generated_at || null,
     },
     profile,
   });
@@ -828,10 +850,23 @@ ${transcript}`,
     const llm = await aiClient.generateWithTools({
       systemPrompt, messages, tools: [], executor: () => ({}), maxIterations: 1,
     });
+    const summary = (llm.text || '').trim();
+    const generatedAt = new Date();
+    try {
+      await pg.query(
+        `UPDATE crm_conversations
+            SET ai_summary = $2, ai_summary_msg_count = $3, ai_summary_generated_at = $4
+          WHERE id = $1`,
+        [id, summary, ctx.messages.length, generatedAt]
+      );
+    } catch (e) {
+      logger.warn({ err: e.message, convId: id }, '[ai-summary] cache save failed');
+    }
     res.json({
       success: true,
-      summary: (llm.text || '').trim(),
+      summary,
       message_count: ctx.messages.length,
+      generated_at: generatedAt.toISOString(),
       usage: llm.usage,
     });
   } catch (err) {

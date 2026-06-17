@@ -1,6 +1,6 @@
 import { useRouter } from 'next/router';
-import { useState, useCallback, useRef } from 'react';
-import useSWR from 'swr';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import useSWR, { mutate } from 'swr';
 import Layout from '@/components/Layout';
 import ChatThread from '@/components/ChatThread';
 import HandoverBanner from '@/components/HandoverBanner';
@@ -37,6 +37,30 @@ export default function ChatDetail() {
   const [chipsOpen, setChipsOpen] = useState(false);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // Redirect into the Lotus chat. Nearly every WAHA conversation is mirrored
+  // from Lotus (crm_conversations.lotus_id, ~99.98% populated), and the Lotus
+  // inbox is now the primary surface. Resolve conversation_id → lotus_id and
+  // router.replace into /lotus-inbox/<lotus_id>. The rare unmirrored conv
+  // (lotus_id null) or a lookup failure falls back to this legacy detail page.
+  const [redirectState, setRedirectState] = useState('pending'); // pending | redirecting | legacy
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setRedirectState('pending');
+    api(`/api/inbox/conversations/${id}/lotus-id`)
+      .then((r) => {
+        if (cancelled) return;
+        if (r?.lotus_id) {
+          setRedirectState('redirecting');
+          router.replace(`/lotus-inbox/${encodeURIComponent(r.lotus_id)}`);
+        } else {
+          setRedirectState('legacy');
+        }
+      })
+      .catch(() => { if (!cancelled) setRedirectState('legacy'); });
+    return () => { cancelled = true; };
+  }, [id, router]);
 
   const { data: tplData } = useSWR('/api/ops/reply-templates', fetcher);
   const { data: snipData } = useSWR('/api/users/me/snippets', fetcher);
@@ -238,7 +262,8 @@ export default function ChatDetail() {
     setSummary(null);
     try {
       const r = await api(`/api/inbox/conversations/${id}/ai-summary`, { method: 'POST' });
-      setSummary({ text: r.summary, count: r.message_count, at: new Date().toISOString() });
+      setSummary({ text: r.summary, count: r.message_count, at: r.generated_at || new Date().toISOString() });
+      mutate(`/api/inbox/conversations/${id}/customer`);
     } catch (err) {
       toast.error('Summary gagal: ' + err.message);
     } finally {
@@ -285,13 +310,24 @@ export default function ChatDetail() {
   }, [id, conv, toast]);
 
   if (!id) return null;
+  // While resolving lotus_id (or mid-redirect), show a light loader instead of
+  // flashing the legacy chat. Only the rare unmirrored conv renders below.
+  if (redirectState !== 'legacy') {
+    return (
+      <Layout title="Membuka chat…">
+        <div className="h-full flex items-center justify-center text-sm text-slate-400">
+          Membuka chat di Lotus…
+        </div>
+      </Layout>
+    );
+  }
   const status = convData ? convStatusLabel(convData) : null;
   const isPaused = convData?.ai_paused_until && new Date(convData.ai_paused_until) > new Date();
   const isSnoozed = convData?.snoozed_until && new Date(convData.snoozed_until) > new Date();
 
   return (
     <Layout title={`Chat ${convData?.phone || ''} — Tiara`}>
-      <div className="max-w-7xl mx-auto h-[calc(100vh-57px)] flex">
+      <div className="max-w-7xl mx-auto h-full flex">
         <div className="flex-1 min-w-0 flex flex-col">
         {/* Header — stacked on mobile (identity row + action row), inline on sm+ */}
         <div className="bg-white border-b border-slate-200 px-3 sm:px-6 py-3">
@@ -618,7 +654,7 @@ export default function ChatDetail() {
         {/* Composer */}
         <form
           onSubmit={sendReply}
-          className="bg-white border-t border-slate-200 px-3 sm:px-4 py-3"
+          className="bg-white border-t border-slate-200 px-3 sm:px-4 py-2"
         >
           <input
             ref={fileInputRef}
@@ -631,7 +667,7 @@ export default function ChatDetail() {
           {/* Quick-reply chips — collapsible (default closed; expand for 1-tap insert).
               Hint: ketik /shortcut di textarea juga buka template picker. */}
           {quickChips.length > 0 && (
-            <div className="mb-2">
+            <div className={chipsOpen ? 'mb-2' : 'mb-1'}>
               <button
                 type="button"
                 onClick={() => setChipsOpen((v) => !v)}
@@ -676,8 +712,8 @@ export default function ChatDetail() {
                   if (e.key === 'Escape') setTplOpen(false);
                 }}
                 placeholder="Ketik balasan operator… (ketik /shortcut untuk template)"
-                rows={2}
-                className="w-full resize-none border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500 min-h-[60px]"
+                rows={5}
+                className="w-full resize-y border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-brand-500 min-h-[140px]"
               />
               {tplOpen && allTemplates.length > 0 && (
                 <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-y-auto z-10">
@@ -804,7 +840,7 @@ export default function ChatDetail() {
         </div>
 
         {/* Right sidebar: customer profile (desktop) */}
-        <div className="hidden lg:block">
+        <div className="hidden lg:block h-full">
           <CustomerPanel convId={id} />
         </div>
 
