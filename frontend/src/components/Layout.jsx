@@ -8,9 +8,13 @@ import NotificationsBell from './NotificationsBell';
 
 const navItems = [
   { href: '/inbox',             label: 'Inbox',      icon: '💬' },
+  { href: '/lotus-inbox',       label: 'Lotus Inbox',icon: '🪷' },
+  { href: '/customer',          label: 'Customer',   icon: '🎫' },
+  { href: '/tax-requests',      label: 'Faktur Pajak', icon: '🧾' },
   { href: '/pipeline',          label: 'Pipeline',   icon: '📊' },
   { href: '/tasks',             label: 'Tasks',      icon: '✅' },
   { href: '/supervisor',        label: 'Supervisor', icon: '👁',  adminOnly: true },
+  { href: '/supervisor-control', label: 'Supervisor Control', icon: '👁‍🗨', adminOnly: true },
   { href: '/lead-distribution', label: 'Leads',      icon: '🎯', adminOnly: true },
   { href: '/retention',         label: 'Retention',  icon: '🔁', adminOnly: true },
   { href: '/b2b-outreach',      label: 'B2B Outreach', icon: '🏢', adminOnly: true },
@@ -23,11 +27,14 @@ const navItems = [
   { href: '/sql-queries',       label: 'SQL',        icon: '🗄' },
   { href: '/users',             label: 'Users',      icon: '👤' },
   { href: '/snippets',          label: 'Snippets',   icon: '✂️' },
+  { href: '/channel-settings',  label: 'Channel',    icon: '🔌', adminOnly: true },
 ];
 
 function isActive(pathname, href) {
   if (pathname === href) return true;
-  if (href === '/inbox' && pathname.startsWith('/inbox')) return true;
+  if (href === '/inbox' && pathname === '/inbox') return true;
+  if (href === '/inbox' && pathname.startsWith('/inbox/')) return true;
+  if (href === '/lotus-inbox' && pathname.startsWith('/lotus-inbox')) return true;
   return false;
 }
 
@@ -98,7 +105,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
   const visibleNav = navItems.filter((it) => !it.adminOnly || user?.role === 'admin');
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col">
       {/* Top bar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
@@ -174,7 +181,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
       </header>
 
       {/* Body: desktop sidebar + main */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex min-h-0">
         {/* Desktop sidebar */}
         <aside
           className={`hidden md:flex flex-col bg-white border-r border-slate-200 sticky top-[49px] self-start transition-[width] duration-150 ease-out overflow-hidden ${
@@ -221,58 +228,102 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
               className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
             />
             <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl flex flex-col">
-              <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between">
-                <span className="font-semibold text-slate-800">Tiara CRM</span>
-                <button
-                  onClick={() => setDrawerOpen(false)}
-                  aria-label="Tutup menu"
-                  className="w-9 h-9 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
-                >
-                  ✕
-                </button>
+              {/* Gradient header (Mitra style) */}
+              <div className="drawer-gradient px-5 py-5 text-white">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-white/20 grid place-items-center text-lg">🌸</div>
+                    <span className="font-extrabold text-lg tracking-tight">Tiara CRM</span>
+                  </div>
+                  <button
+                    onClick={() => setDrawerOpen(false)}
+                    aria-label="Tutup menu"
+                    className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-white/90 hover:bg-white/15"
+                  >✕</button>
+                </div>
+                <div className="mt-3 text-[13px] text-white/90 truncate">
+                  <div className="font-semibold">{user.username}</div>
+                  <div className="opacity-80 text-[11px] uppercase tracking-wide">{user.role}</div>
+                </div>
               </div>
-              <nav className="flex-1 px-2 py-3 overflow-y-auto">
-                {visibleNav.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-2 px-3 py-2.5 rounded-md text-sm mb-1 ${
-                      isActive(router.pathname, item.href)
-                        ? 'bg-brand-50 text-brand-700 font-medium'
-                        : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span aria-hidden className="w-5 text-center text-base">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </Link>
-                ))}
-                <div className="border-t border-slate-100 mt-2 pt-2">
+              <nav className="flex-1 py-2 overflow-y-auto">
+                {visibleNav.map((item) => {
+                  const active = isActive(router.pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center gap-3 px-4 py-2.5 text-sm transition ${
+                        active
+                          ? 'bg-violet-50 text-violet-700 font-semibold border-l-4 border-violet-600 pl-3'
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span aria-hidden className="w-5 text-center text-base">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+                <div className="border-t border-slate-100 mt-2 pt-1">
                   <a href="/admin/waha-sessions.html"
-                    className="block px-4 py-3 rounded-md text-sm text-slate-700 hover:bg-slate-100">
-                    ⚙ WAHA Sessions
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
+                    <span className="w-5 text-center">⚙</span>
+                    <span>WAHA Sessions</span>
                   </a>
                 </div>
               </nav>
-              <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
-                <span className="text-sm text-slate-500 truncate" title={`${user.username} (${user.role})`}>
-                  {user.username} <span className="text-slate-400">({user.role})</span>
-                </span>
+              <div className="px-4 py-3 border-t border-slate-200">
                 <button
                   onClick={() => { setDrawerOpen(false); logout(); }}
-                  className="text-sm text-rose-600 px-3 py-1.5 rounded-md hover:bg-rose-50"
+                  className="w-full text-sm text-rose-600 px-3 py-2.5 rounded-lg hover:bg-rose-50 font-medium flex items-center justify-center gap-2"
                 >
-                  Logout
+                  <span>↪</span> Logout
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        <main className="flex-1 min-w-0">
+        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto has-bottom-nav md:!pb-0">
           <title>{title}</title>
           {children}
         </main>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-white border-t border-slate-200 flex justify-around items-center px-2 pt-1.5"
+        style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom, 0px))' }}
+      >
+        {[
+          { href: '/lotus-inbox', label: 'Inbox', icon: '🪷' },
+          { href: '/customer',    label: 'Customer', icon: '🎫' },
+          { href: '/pipeline',    label: 'Pipeline', icon: '📊' },
+          { href: '/ai-monitor',  label: 'AI', icon: '🤖' },
+        ].map((it) => {
+          const active = isActive(router.pathname, it.href);
+          return (
+            <Link
+              key={it.href}
+              href={it.href}
+              className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-1 rounded-md text-[10px] font-semibold ${
+                active ? 'text-violet-700' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-lg leading-none">{it.icon}</span>
+              <span>{it.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1 rounded-md text-[10px] font-semibold text-slate-500"
+          aria-label="Menu lainnya"
+        >
+          <span className="text-lg leading-none">☰</span>
+          <span>Lainnya</span>
+        </button>
+      </nav>
 
       <MessageSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
