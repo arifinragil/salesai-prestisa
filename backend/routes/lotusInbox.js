@@ -1024,13 +1024,36 @@ Constraint:
     ai_ms: aiMs, ai_error: aiErr,
   });
 
+  let sugLogId = null;
+  try {
+    const lg = await pg.query(
+      `INSERT INTO crm_lotus_suggestion_log (lotus_id, cust_number, options, staff_id) VALUES ($1,$2,$3::jsonb,$4) RETURNING id`,
+      [id, ctx?.contact?.cust_number || null, JSON.stringify(options), req.staff.staff_id]
+    );
+    sugLogId = lg.rows[0].id;
+  } catch (e) {}
+
   res.json({
     success: true,
     options,
+    log_id: sugLogId,
     generation_ms: Date.now() - t0,
     low_confidence: lowConfidence,
     inbound_preview: inboundBody.slice(0, 120),
   });
+});
+
+// POST /contacts/:lotus_id/suggestion/:logId/used — catat pemakaian saran Lotus
+router.post('/contacts/:lotus_id/suggestion/:logId/used', async (req, res, next) => {
+  try {
+    const { picked_rank, usage_type, edit_distance } = req.body || {};
+    const ut = ['raw', 'edited', 'manual'].includes(usage_type) ? usage_type : null;
+    await pg.query(
+      `UPDATE crm_lotus_suggestion_log SET picked_rank = $2, usage_type = $3, edit_distance = $4 WHERE id = $1`,
+      [parseInt(req.params.logId), picked_rank ?? null, ut, edit_distance ?? null]
+    );
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 router.post('/contacts/:lotus_id/ai-summary', async (req, res) => {
