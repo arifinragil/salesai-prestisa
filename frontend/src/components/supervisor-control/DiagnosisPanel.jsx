@@ -19,7 +19,7 @@ export default function DiagnosisPanel({ lotusId, onAction }) {
     setLoading(true); setError(null);
     try {
       const data = await api(`/api/lotus-inbox/contacts/${lotusId}/analyst-report`, {
-        method: 'POST', body: JSON.stringify({ tier: 'A' }),
+        method: 'POST', body: { tier: 'A' },
       });
       setReport(data);
     } catch (e) { setError(e.message || 'Gagal generate'); }

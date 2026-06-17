@@ -19,7 +19,7 @@ export default function SupervisorControl() {
 
   async function handleAction(lotusId, action, payload) {
     await api(`/api/supervisor-control/lead/${lotusId}/action`, {
-      method: 'POST', body: JSON.stringify({ action, ...payload }),
+      method: 'POST', body: { action, ...payload },
     });
     if (action === 'ack' || action === 'resolve') setHidden((h) => ({ ...h, [lotusId]: true }));
   }
