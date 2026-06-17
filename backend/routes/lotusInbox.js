@@ -1590,8 +1590,13 @@ router.post('/contacts/:lotus_id/analyst-report', async (req, res) => {
 
   if (tier === 'A') {
     try {
+      const corrections = (await pg.query(
+        `SELECT corrected_root_cause AS to, corrected_reason AS reason FROM crm_lead_supervisor_actions
+         WHERE action='revise_ai' AND corrected_root_cause IS NOT NULL ORDER BY created_at DESC LIMIT 15`
+      )).rows;
+
       const { validated, usage, duration_ms } = await runTierA({
-        transcript, msgCount: ctx.messages.length, inboundCount, geminiKey
+        transcript, msgCount: ctx.messages.length, inboundCount, geminiKey, corrections
       });
 
       await pg.query(
@@ -1599,8 +1604,9 @@ router.post('/contacts/:lotus_id/analyst-report', async (req, res) => {
             lead_status, funnel_stage_lost, customer_intent, no_response_after,
             controllability, decision_maker, internal_root_cause_categories,
             sales_handling, product_solution_fit, confidence_v2, evidence_quote,
+            stuck_group, stuck_issue,
             analyst_report_generated_at, analyst_report_msg_count, root_cause_tagged_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now(), $14, now())
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now(), $16, now())
          ON CONFLICT (lotus_id) DO UPDATE SET
             root_cause_tag                 = EXCLUDED.root_cause_tag,
             lead_status                    = EXCLUDED.lead_status,
@@ -1614,6 +1620,8 @@ router.post('/contacts/:lotus_id/analyst-report', async (req, res) => {
             product_solution_fit           = EXCLUDED.product_solution_fit,
             confidence_v2                  = EXCLUDED.confidence_v2,
             evidence_quote                 = EXCLUDED.evidence_quote,
+            stuck_group                    = EXCLUDED.stuck_group,
+            stuck_issue                    = EXCLUDED.stuck_issue,
             analyst_report_generated_at    = now(),
             analyst_report_msg_count       = EXCLUDED.analyst_report_msg_count,
             root_cause_tagged_at           = now()`,
@@ -1622,6 +1630,7 @@ router.post('/contacts/:lotus_id/analyst-report', async (req, res) => {
           validated.lead_status, validated.funnel_stage_lost, validated.customer_intent, validated.no_response_after,
           validated.controllability, validated.decision_maker, validated.internal_root_cause_categories,
           validated.sales_handling, validated.product_solution_fit, validated.confidence, validated.evidence_quote,
+          validated.stuck_group, validated.stuck_issue,
           ctx.messages.length,
         ]
       );
