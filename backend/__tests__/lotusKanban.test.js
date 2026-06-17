@@ -91,3 +91,40 @@ describe('scoping by role', () => {
     expect(res.body.items.map((i) => i.lotus_id).sort()).toEqual(['A', 'C']);
   });
 });
+
+describe('GET /tab-counts', () => {
+  test('mengembalikan hitungan per tab dalam scope', async () => {
+    stubData(
+      [
+        { lotus_id: 'A', cust_number: '1', last_message_from: 'inbound', last_message_at: minAgo(40) },
+        { lotus_id: 'B', cust_number: '2', last_message_from: 'outbound', last_message_at: minAgo(180) },
+      ],
+      [
+        { lotus_id: 'A', status: 'active', assigned_staff_id: 7, lead_temperature: 'hot' },
+        { lotus_id: 'B', status: 'active', assigned_staff_id: 7 },
+      ]
+    );
+    const res = await request(appWith(ADMIN)).get('/api/lotus-inbox/tab-counts');
+    expect(res.status).toBe(200);
+    expect(res.body.counts.all).toBe(2);
+    expect(res.body.counts.urgent).toBe(1);
+    expect(res.body.counts.tunggu_balas).toBe(1);
+    expect(res.body.counts.tunggu_cust).toBe(1);
+    expect(res.body.counts.hot_asap).toBe(1);
+  });
+
+  test('non-admin hanya menghitung lead miliknya', async () => {
+    stubData(
+      [
+        { lotus_id: 'A', cust_number: '1', last_message_from: 'inbound', last_message_at: minAgo(40) },
+        { lotus_id: 'C', cust_number: '3', last_message_from: 'inbound', last_message_at: minAgo(40) },
+      ],
+      [
+        { lotus_id: 'A', status: 'active', assigned_staff_id: 7 },
+        { lotus_id: 'C', status: 'active', assigned_staff_id: 99 },
+      ]
+    );
+    const res = await request(appWith(SALES)).get('/api/lotus-inbox/tab-counts');
+    expect(res.body.counts.all).toBe(1);
+  });
+});

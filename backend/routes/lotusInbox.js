@@ -190,6 +190,49 @@ router.get('/contacts', async (req, res) => {
   res.json({ success: true, items, count: items.length, limit, offset });
 });
 
+// ── tab-counts: jumlah lead per tab Kanban dalam scope user ───────────────────
+const TAB_KEYS = ['urgent', 'hot_asap', 'customer_baru', 'tunggu_balas', 'mau_closing', 'tunggu_cust'];
+router.get('/tab-counts', async (req, res) => {
+  // Pindai lead aktif 14 hari terakhir (cap 1000) lalu hitung per tab.
+  const { rows: contacts } = await lotus.query(
+    `SELECT c.lotus_id, c.cust_number, c.last_message_from, c.last_message_at, c.last_inbound_at
+     FROM contacts c
+     WHERE GREATEST(c.last_message_at, c.last_inbound_at) >= now() - interval '14 days'
+     ORDER BY GREATEST(c.last_message_at, c.last_inbound_at) DESC NULLS LAST
+     LIMIT 1000`
+  );
+  const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
+
+  const isAdmin = req.staff?.role === 'admin';
+  const scope = req.query.scope;
+  const now = new Date();
+
+  const counts = { all: 0 };
+  for (const k of TAB_KEYS) counts[k] = 0;
+
+  for (const c of contacts) {
+    const s = stateMap.get(c.lotus_id) || {};
+    if ((s.status || 'active') !== 'active') continue;
+    if (!isAdmin || scope === 'mine') {
+      if ((s.assigned_staff_id ?? null) !== req.staff.staff_id) continue;
+    }
+    counts.all += 1;
+    const item = {
+      last_message_from: c.last_message_from,
+      last_message_at: c.last_message_at,
+      first_inbound_at: s.first_inbound_at || null,
+      lead_temperature: s.lead_temperature || null,
+      lead_score: s.lead_score ?? null,
+      last_intent: s.last_intent || null,
+      root_cause_tag: s.root_cause_tag || null,
+      snoozed_until: s.snoozed_until || null,
+    };
+    for (const k of tabsForItem(item, now)) counts[k] += 1;
+  }
+
+  res.json({ success: true, counts });
+});
+
 // ── sales-options ──────────────────────────────────────────────────────────
 // Distinct sales (assign_to_user_name) dari lotus.contacts, untuk dropdown filter.
 router.get('/sales-options', async (_req, res) => {
