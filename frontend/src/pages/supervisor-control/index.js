@@ -26,6 +26,8 @@ export default function SupervisorControl() {
   const d = panel.data || {};
   const g = d.groups || {};
   const buckets = g.lead_stuck ? Object.fromEntries(Object.entries(g.lead_stuck).map(([k, v]) => [k, visible(v)])) : { A: [], B: [], C: [], D: [] };
+  const gc = d.counts?.groups || {};
+  const leadStuckTotal = gc.lead_stuck ? Object.values(gc.lead_stuck).reduce((s, n) => s + (n || 0), 0) : undefined;
 
   return (
     <Layout title="Supervisor Control — Tiara">
@@ -41,10 +43,10 @@ export default function SupervisorControl() {
         {panel.error && <div className="text-sm text-rose-600">Gagal memuat: {panel.error.message}</div>}
 
         <PriorityQueue items={visible(d.priority_queue)} counts={d.counts || {}} onAction={onAction} />
-        <GroupSection title="Sales Response Risk" icon="⚡" items={visible(g.sales_response_risk)} onAction={onAction} />
-        <GroupSection title="Follow Up Customer" icon="🔁" items={visible(g.follow_up)} onAction={onAction}
+        <GroupSection title="Sales Response Risk" icon="⚡" items={visible(g.sales_response_risk)} total={gc.sales_response_risk} onAction={onAction} />
+        <GroupSection title="Follow Up Customer" icon="🔁" items={visible(g.follow_up)} total={gc.follow_up} onAction={onAction}
           extra={(i) => `cycle FU ${i.fu_current_cycle}/3 · ${i.fu_count_today} FU hari ini${i.fu_status === 'overdue' ? ' · overdue' : ''}`} />
-        <GroupSection title="Lead Stuck / Belum Closing" icon="🧩" buckets={buckets} onAction={onAction} />
+        <GroupSection title="Lead Stuck / Belum Closing" icon="🧩" buckets={buckets} total={leadStuckTotal} onAction={onAction} />
         <div className="text-xs text-slate-400">Update tiap 60 detik · {d.counts?.total || 0} lead aktif</div>
       </div>
     </Layout>

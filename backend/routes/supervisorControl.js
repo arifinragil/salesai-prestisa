@@ -71,7 +71,7 @@ router.get('/panel', async (req, res, next) => {
          SELECT c.lotus_id, c.cust_number, c.cust_name, c.business_number, c.assign_to_user_name,
                 c.last_message, c.last_message_from, c.last_message_at, c.last_inbound_at
          FROM contacts c
-         WHERE GREATEST(c.last_message_at, c.last_inbound_at) >= now() - interval '14 days'
+         WHERE GREATEST(c.last_message_at, c.last_inbound_at) >= now() - interval '3 days'
          ORDER BY GREATEST(c.last_message_at, c.last_inbound_at) DESC NULLS LAST
          LIMIT 1000
        )
@@ -142,12 +142,23 @@ router.get('/panel', async (req, res, next) => {
       if (i.groups.includes('follow_up')) groups.follow_up.push(i);
       if (i.groups.includes('lead_stuck') && i.stuck_bucket) groups.lead_stuck[i.stuck_bucket].push(i);
     }
+    // True counts sebelum di-cap; tampilan dibatasi CAP baris/list agar panel ringan & fokus.
+    const CAP = 50;
+    const group_counts = {
+      sales_response_risk: groups.sales_response_risk.length,
+      follow_up: groups.follow_up.length,
+      lead_stuck: Object.fromEntries(Object.entries(groups.lead_stuck).map(([k, v]) => [k, v.length])),
+    };
+    groups.sales_response_risk = groups.sales_response_risk.slice(0, CAP);
+    groups.follow_up = groups.follow_up.slice(0, CAP);
+    for (const k of ['A', 'B', 'C', 'D']) groups.lead_stuck[k] = groups.lead_stuck[k].slice(0, CAP);
+
     res.json({
-      priority_queue, groups,
+      priority_queue: priority_queue.slice(0, CAP), groups,
       counts: { P1: priority_queue.filter((i) => i.priority === 'P1').length,
                 P2: priority_queue.filter((i) => i.priority === 'P2').length,
                 P3: priority_queue.filter((i) => i.priority === 'P3').length,
-                total: items.length },
+                total: items.length, queue_total: priority_queue.length, groups: group_counts, cap: CAP },
     });
   } catch (e) { next(e); }
 });

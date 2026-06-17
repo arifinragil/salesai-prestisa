@@ -35,14 +35,16 @@ function classify(lead) {
   const inquiry = INQUIRY_RE.test(String(lead.last_intent || '')) || INQUIRY_RE.test(String(lead.customer_intent || ''));
   const fuIncomplete = lead.fu_status === 'overdue';
   const stuck = !!(lead.root_cause_tag || lead.funnel_stage_lost) && lead.root_cause_tag !== 'sudah_closing';
+  // Customer-silence hanya actionable dalam jendela 1 jam–24 jam (>24 jam = stale / data-pending).
+  const acrActionable = acr != null && acr > 60 && acr <= 1440;
 
   const groups = [];
   if (lead.never_responded || asr != null || (lag != null && lag > 1)) groups.push('sales_response_risk');
-  if (acr != null || ['overdue', 'pending', 'fresh'].includes(lead.fu_status) || lead.single_bubble) groups.push('follow_up');
+  if (acrActionable || lead.fu_status === 'overdue' || lead.single_bubble) groups.push('follow_up');
   if (stuck) groups.push('lead_stuck');
 
   const p1 = lead.never_responded || (asr != null && asr > 10) || (asked && asr != null);
-  const p2 = (acr != null && acr > 60) || fuIncomplete || ((hot || (score != null && score >= HIGH_SCORE)) && stuck);
+  const p2 = acrActionable || fuIncomplete || ((hot || (score != null && score >= HIGH_SCORE)) && stuck);
   const p3 = lead.single_bubble || inquiry || groups.length > 0;
 
   let priority = null;
