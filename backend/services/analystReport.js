@@ -8,7 +8,11 @@ Output WAJIB JSON valid sesuai schema. Tidak boleh ada teks lain di luar JSON.
 Diagnosis berbasis bukti chat. Tidak boleh mengarang. Kalau ragu, set confidence='low'.
 Pisahkan jelas Customer Reason (alasan permukaan customer) vs Internal Root Cause (akar masalah yang tim bisa fix).`;
 
-function buildTierAUserPrompt({ transcript, msgCount, inboundCount }) {
+function buildTierAUserPrompt({ transcript, msgCount, inboundCount, corrections }) {
+  const corrBlock = Array.isArray(corrections) && corrections.length
+    ? `\nKOREKSI SUPERVISOR DARI LAPANGAN (pelajari pola ini saat menilai):\n` +
+      corrections.slice(0, 15).map((c) => `- root cause sebenarnya: ${c.to}${c.reason ? ` (alasan: ${c.reason})` : ''}`).join('\n') + '\n'
+    : '';
   return `Analisa transkrip berikut dan output JSON dengan field-field ini.
 
 ENUM yang valid:
@@ -33,6 +37,14 @@ harga_terlalu_mahal | barang_tidak_tersedia | respon_lambat | info_produk_kurang
 ekspektasi_design | area_pengiriman | timing_pengiriman | kompetitor |
 ragu_kredibilitas | window_shopping | sudah_closing | bukan_lead | lainnya
 
+stuck_group — grup issue lead yang belum closing (null kalau tidak stuck / sudah closing):
+"customer" | "sales" | "offer" | "proses"
+stuck_issue — sub-issue spesifik (1 frasa pendek), contoh per grup:
+customer: tanya harga / belum ada tanggal jelas / bandingkan vendor / belum balas setelah quotation / keberatan harga / menunggu approval / belum yakin desain
+sales: kurang gali kebutuhan / terlalu cepat kirim harga / belum jelaskan value / salah rekomendasi / belum opsi Good-Better-Best / belum urgency / follow up pasif / tidak tangkap buying signal
+offer: produk tidak sesuai / harga tidak masuk budget / desain kurang cocok / area-waktu kirim kendala / promo kurang menarik / tidak ada alternatif
+proses: belum FU sesuai cycle / response time lama / quotation belum dikirim / bukti desain belum dikirim / perlu eskalasi supervisor
+
 sales_handling — 6 boolean (true = sudah baik, false = ada gap):
 discovery, recommendation, quotation_quality, objection_handling, cta, follow_up
 
@@ -52,14 +64,16 @@ Output JSON saja, tidak ada teks lain:
   "sales_handling": {"discovery": false, "recommendation": false, "quotation_quality": true, "objection_handling": false, "cta": true, "follow_up": false},
   "product_solution_fit": {"budget": false, "timeline": true, "occasion": true, "customer_profile": null},
   "confidence": "high",
+  "stuck_group": "customer" | "sales" | "offer" | "proses" | null,
+  "stuck_issue": "<frasa pendek>" | null,
   "evidence_quote": "<quote max 100 char>"
 }
-
+${corrBlock}
 Transkrip (${msgCount} pesan, ${inboundCount} inbound):
 ${transcript}`;
 }
 
-async function runTierA({ transcript, msgCount, inboundCount, geminiKey }) {
+async function runTierA({ transcript, msgCount, inboundCount, geminiKey, corrections }) {
   const genAI = new GoogleGenerativeAI(geminiKey);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
@@ -71,7 +85,7 @@ async function runTierA({ transcript, msgCount, inboundCount, geminiKey }) {
       thinkingConfig: { thinkingBudget: 0 },
     },
   });
-  const prompt = buildTierAUserPrompt({ transcript, msgCount, inboundCount });
+  const prompt = buildTierAUserPrompt({ transcript, msgCount, inboundCount, corrections });
   const t0 = Date.now();
   let r;
   try { r = await model.generateContent(prompt); }
