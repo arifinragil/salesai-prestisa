@@ -129,6 +129,19 @@ describe('GET /tab-counts', () => {
   });
 });
 
+describe('first_inbound_at derived from messages (state empty)', () => {
+  const dAgo = (d) => new Date(Date.now() - d * 24 * 3600 * 1000).toISOString();
+  test('anchor diambil dari kolom contact (derived) saat state.first_inbound_at kosong', async () => {
+    stubData(
+      [{ lotus_id: 'A', cust_number: '1', last_message_from: 'outbound', last_message_at: dAgo(2), first_inbound_at: dAgo(2) }],
+      [{ lotus_id: 'A', status: 'active', assigned_staff_id: 7 }] // state TANPA first_inbound_at
+    );
+    const res = await request(appWith(ADMIN)).get('/api/lotus-inbox/contacts?tab=fu_overdue');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((i) => i.lotus_id)).toEqual(['A']);
+  });
+});
+
 describe('FU overdue (filter + counts)', () => {
   const dAgo = (d) => new Date(Date.now() - d * 24 * 3600 * 1000).toISOString();
 

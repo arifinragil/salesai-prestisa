@@ -108,7 +108,8 @@ router.get('/contacts', async (req, res) => {
             COALESCE(lm.body,        p.last_message)    AS last_message,
             COALESCE(lm.direction,   p.last_message_from) AS last_message_from,
             lcs.cs_name AS last_outbound_cs,
-            lcs.received_at AS last_outbound_at
+            lcs.received_at AS last_outbound_at,
+            fim.received_at AS first_inbound_at
      FROM paged p
      LEFT JOIN LATERAL (
        SELECT received_at, body, direction
@@ -126,6 +127,13 @@ router.get('/contacts', async (req, res) => {
        ORDER BY received_at DESC NULLS LAST, id DESC
        LIMIT 1
      ) lcs ON true
+     LEFT JOIN LATERAL (
+       SELECT received_at
+       FROM messages m
+       WHERE m.cust_number = p.cust_number AND m.direction = 'inbound'
+       ORDER BY received_at ASC NULLS LAST, id ASC
+       LIMIT 1
+     ) fim ON true
      ORDER BY COALESCE(lm.received_at, p.last_message_at) DESC NULLS LAST`,
     params
   );
@@ -165,7 +173,7 @@ router.get('/contacts', async (req, res) => {
       lead_score: s.lead_score ?? null,
       last_intent: s.last_intent || null,
       root_cause_tag: s.root_cause_tag || null,
-      first_inbound_at: s.first_inbound_at || null,
+      first_inbound_at: s.first_inbound_at || c.first_inbound_at || null,
       first_response_at: s.first_response_at || null,
       handover_count: s.handover_count ?? 0,
     };
@@ -212,7 +220,8 @@ router.get('/tab-counts', async (req, res) => {
      SELECT r.lotus_id, r.cust_number,
             COALESCE(lm.direction,   r.last_message_from) AS last_message_from,
             COALESCE(lm.received_at,  r.last_message_at)  AS last_message_at,
-            lo.received_at AS last_outbound_at
+            lo.received_at AS last_outbound_at,
+            fim.received_at AS first_inbound_at
      FROM recent r
      LEFT JOIN LATERAL (
        SELECT received_at, direction
@@ -227,7 +236,14 @@ router.get('/tab-counts', async (req, res) => {
        WHERE m.cust_number = r.cust_number AND m.direction = 'outbound'
        ORDER BY received_at DESC NULLS LAST, id DESC
        LIMIT 1
-     ) lo ON true`
+     ) lo ON true
+     LEFT JOIN LATERAL (
+       SELECT received_at
+       FROM messages m
+       WHERE m.cust_number = r.cust_number AND m.direction = 'inbound'
+       ORDER BY received_at ASC NULLS LAST, id ASC
+       LIMIT 1
+     ) fim ON true`
   );
   const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
 
@@ -250,7 +266,7 @@ router.get('/tab-counts', async (req, res) => {
     const item = {
       last_message_from: c.last_message_from,
       last_message_at: c.last_message_at,
-      first_inbound_at: s.first_inbound_at || null,
+      first_inbound_at: s.first_inbound_at || c.first_inbound_at || null,
       lead_temperature: s.lead_temperature || null,
       lead_score: s.lead_score ?? null,
       last_intent: s.last_intent || null,
