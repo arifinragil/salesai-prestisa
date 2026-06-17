@@ -6,6 +6,7 @@ const express = require('express');
 const pg = require('../db/postgres');
 const lotus = require('../db/lotus');
 const mysql = require('../db/mysql');
+const { tabsForItem } = require('../services/lotusTabs');
 const { requireStaff } = require('../middleware/auth');
 const vonage = require('../services/waAdapters/vonageAdapter');
 const { upload, publicUrlFor, attachmentTypeFor } = require('../services/uploadService');
@@ -145,6 +146,7 @@ router.get('/contacts', async (req, res) => {
       last_body: c.last_message,
       last_message_from: c.last_message_from,
       last_at: c.last_message_at,
+      last_message_at: c.last_message_at,
       last_inbound_at: c.last_inbound_at,
       unread: c.unread_counter || 0,
       city_name: c.city_name,
@@ -157,11 +159,31 @@ router.get('/contacts', async (req, res) => {
       snoozed_until: s.snoozed_until || null,
       ai_paused_until: s.ai_paused_until || null,
       lead_temperature: s.lead_temperature || null,
+      lead_score: s.lead_score ?? null,
+      last_intent: s.last_intent || null,
+      root_cause_tag: s.root_cause_tag || null,
+      first_inbound_at: s.first_inbound_at || null,
+      first_response_at: s.first_response_at || null,
+      handover_count: s.handover_count ?? 0,
     };
   }).filter((it) => {
-    if (status && it.status !== status) return false;
+    const isAdmin = req.staff?.role === 'admin';
+    const scope = req.query.scope; // 'mine' | 'team' (admin saja); non-admin selalu 'mine'
+    const tab = req.query.tab;
+    const effStatus = req.query.status || (tab ? 'active' : null);
+
+    if (effStatus && it.status !== effStatus) return false;
+
+    // Scoping per-user: non-admin hanya lead miliknya; admin default semua (toggle 'mine').
+    if (!isAdmin || scope === 'mine') {
+      if (it.assigned_staff_id !== req.staff.staff_id) return false;
+    }
+    // Filter queue lama tetap didukung
     if (queue === 'mine'        && it.assigned_staff_id !== req.staff.staff_id) return false;
     if (queue === 'unassigned'  && it.assigned_staff_id != null) return false;
+
+    // Tab match (all = semua active dalam scope)
+    if (tab && tab !== 'all' && !tabsForItem(it, new Date()).includes(tab)) return false;
     return true;
   });
 
