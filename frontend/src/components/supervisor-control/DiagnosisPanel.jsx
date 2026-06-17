@@ -22,9 +22,15 @@ export default function DiagnosisPanel({ lead, onAction }) {
   async function loadAction() {
     setLoadingB(true); setError(null);
     try {
+      // Tier B butuh Tier A dulu — generate/cache A, lalu ambil narasi B.
+      await api(`/api/lotus-inbox/contacts/${lead.lotus_id}/analyst-report`, { method: 'POST', body: { tier: 'A' } });
       const d = await api(`/api/lotus-inbox/contacts/${lead.lotus_id}/analyst-report`, { method: 'POST', body: { tier: 'B' } });
       setTierB(d.analyst_summary_md || d.summary || 'Tidak ada ringkasan.');
-    } catch (e) { setError(e.message || 'Gagal'); } finally { setLoadingB(false); }
+    } catch (e) {
+      if (e?.body?.code === 'INBOUND_TOO_LOW') setError('Percakapan terlalu pendek untuk saran AI (butuh ≥4 pesan masuk dari customer).');
+      else if (e?.status === 400) setError(e?.body?.message || 'Belum cukup data untuk saran AI pada lead ini.');
+      else setError(e?.message || 'Gagal memuat saran.');
+    } finally { setLoadingB(false); }
   }
 
   return (
