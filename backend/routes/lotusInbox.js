@@ -876,13 +876,23 @@ router.post('/contacts/:lotus_id/ai-suggest-reply', async (req, res) => {
   const baseSystem = await persona.buildSystemPrompt({
     conv: fakeConv, customerName: ctx.contact.cust_name, cityHint: ctx.contact.city_name || null,
   });
+
+  const lastInboundSuggest = [...ctx.messages].reverse().find((m) => m.sender_type === 'customer');
+  const inboundBodySuggest = (lastInboundSuggest?.body || '').slice(0, 1000);
+  let qnaRefsSuggest = [];
+  try { qnaRefsSuggest = await require('../services/qnaRag').retrieveSimilar(inboundBodySuggest, { business_number: ctx.contact.business_number }); } catch (e) {}
+  const qnaBlockSuggest = qnaRefsSuggest.length
+    ? `\n\nReferensi Q&A yang terbukti baik (pakai sebagai acuan gaya & isi, JANGAN plagiat mentah):\n` +
+      qnaRefsSuggest.map((r) => `Q: ${r.question}\nA: ${r.answer}`).join('\n---\n')
+    : '';
+
   const systemPrompt = `${baseSystem}
 
 === MODE: OPERATOR ASSIST (LOTUS) ===
 Saat ini operator manusia handle chat ini di /lotus-inbox. Tugasmu:
 - Saran 1 balasan SINGKAT (1-3 kalimat).
 - JANGAN pakai tool request_handover.
-- Output HANYA teks balasan, tanpa preamble.`;
+- Output HANYA teks balasan, tanpa preamble.${qnaBlockSuggest}`;
 
   const messages = persona.buildHistoryMessages(ctx.messages);
   if (!messages.length || messages[messages.length - 1].role !== 'user') {
@@ -950,6 +960,13 @@ router.post('/contacts/:lotus_id/ai-suggestions', async (req, res) => {
       : m.sender_type === 'staff' ? 'Operator' : 'Tiara';
     return `${who}: ${(m.body || `[${m.message_type}]`).slice(0, 300)}`;
   }).join('\n');
+  let qnaRefs = [];
+  try { qnaRefs = await require('../services/qnaRag').retrieveSimilar(inboundBody, { business_number: ctx.contact.business_number }); } catch (e) {}
+  const qnaBlock = qnaRefs.length
+    ? `\n\nReferensi Q&A yang terbukti baik (pakai sebagai acuan gaya & isi, JANGAN plagiat mentah):\n` +
+      qnaRefs.map((r) => `Q: ${r.question}\nA: ${r.answer}`).join('\n---\n')
+    : '';
+
   const casesBlock = caseItems.map((c, i) => `${i + 1}. ${c.body}`).join('\n') || '(belum ada saran case)';
   const aiPrompt = `Customer message terbaru: "${inboundBody || '(tidak ada teks)'}"
 Last 5 turns:
@@ -973,7 +990,7 @@ Constraint:
     const resp = await Promise.race([
       aiClient.complete({
         system: sys,
-        messages: [{ role: 'user', content: aiPrompt }],
+        messages: [{ role: 'user', content: aiPrompt + qnaBlock }],
         max_tokens: 400, temperature: 0.4,
       }),
       new Promise((_, rej) => setTimeout(() => rej(new Error('ai_timeout')), AI_TIMEOUT_MS)),

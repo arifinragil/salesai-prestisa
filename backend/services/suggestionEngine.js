@@ -44,19 +44,27 @@ Constraint:
 - Output: HANYA text reply, tanpa preamble, tanpa quote marks, tanpa label.`;
 }
 
-async function generateAi({ inboundBody, intent, intentConf, turns, caseOptions }) {
+async function generateAi({ inboundBody, intent, intentConf, turns, caseOptions, businessNumber }) {
   let sys = '';
   try {
     const p = await persona.loadActivePrompt();
     sys = p?.prompt_text || '';
   } catch { /* no persona seeded — proceed without system prompt */ }
 
+  let qnaRefs = [];
+  try { qnaRefs = await require('./qnaRag').retrieveSimilar(inboundBody, { business_number: businessNumber }); } catch (e) {}
+
+  const qnaBlock = qnaRefs.length
+    ? `\n\nReferensi Q&A yang terbukti baik (pakai sebagai acuan gaya & isi, JANGAN plagiat mentah):\n` +
+      qnaRefs.map((r) => `Q: ${r.question}\nA: ${r.answer}`).join('\n---\n')
+    : '';
+
   const t0 = Date.now();
   try {
     const resp = await Promise.race([
       aiClient.complete({
         system: sys,
-        messages: [{ role: 'user', content: buildAiPrompt({ inboundBody, intent, intentConf, turns, caseOptions }) }],
+        messages: [{ role: 'user', content: buildAiPrompt({ inboundBody, intent, intentConf, turns, caseOptions }) + qnaBlock }],
         max_tokens: 400,
         temperature: 0.4,
       }),
@@ -71,7 +79,7 @@ async function generateAi({ inboundBody, intent, intentConf, turns, caseOptions 
 }
 
 async function generate(opts) {
-  const { conversationId, inboundMsgId, inboundBody, intent, intentConf, regen, regenLogId } = opts;
+  const { conversationId, inboundMsgId, inboundBody, intent, intentConf, regen, regenLogId, businessNumber } = opts;
   const t0 = Date.now();
 
   const [{ items: caseItems, lowConfidence }, turns] = await Promise.all([
@@ -79,7 +87,7 @@ async function generate(opts) {
     lastTurns(conversationId, 5),
   ]);
 
-  const aiResult = await generateAi({ inboundBody, intent, intentConf, turns, caseOptions: caseItems });
+  const aiResult = await generateAi({ inboundBody, intent, intentConf, turns, caseOptions: caseItems, businessNumber });
 
   const options = caseItems.map((c, i) => ({
     rank: i + 1,
