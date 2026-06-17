@@ -7,6 +7,7 @@ const pg = require('../db/postgres');
 const lotus = require('../db/lotus');
 const mysql = require('../db/mysql');
 const { tabsForItem } = require('../services/lotusTabs');
+const { followupState } = require('../services/lotusFollowup');
 const { requireStaff } = require('../middleware/auth');
 const vonage = require('../services/waAdapters/vonageAdapter');
 const { upload, publicUrlFor, attachmentTypeFor } = require('../services/uploadService');
@@ -106,7 +107,8 @@ router.get('/contacts', async (req, res) => {
             COALESCE(lm.received_at, p.last_message_at) AS last_message_at,
             COALESCE(lm.body,        p.last_message)    AS last_message,
             COALESCE(lm.direction,   p.last_message_from) AS last_message_from,
-            lcs.cs_name AS last_outbound_cs
+            lcs.cs_name AS last_outbound_cs,
+            lcs.received_at AS last_outbound_at
      FROM paged p
      LEFT JOIN LATERAL (
        SELECT received_at, body, direction
@@ -116,7 +118,7 @@ router.get('/contacts', async (req, res) => {
        LIMIT 1
      ) lm ON true
      LEFT JOIN LATERAL (
-       SELECT cs_name
+       SELECT cs_name, received_at
        FROM messages m
        WHERE m.cust_number = p.cust_number
          AND m.direction = 'outbound'
@@ -148,6 +150,7 @@ router.get('/contacts', async (req, res) => {
       last_at: c.last_message_at,
       last_message_at: c.last_message_at,
       last_inbound_at: c.last_inbound_at,
+      last_outbound_at: c.last_outbound_at || null,
       unread: c.unread_counter || 0,
       city_name: c.city_name,
       lotus_assign_to: c.assign_to_user_name || c.last_outbound_cs || null,
@@ -183,7 +186,11 @@ router.get('/contacts', async (req, res) => {
     if (queue === 'unassigned'  && it.assigned_staff_id != null) return false;
 
     // Tab match (all = semua active dalam scope)
-    if (tab && tab !== 'all' && !tabsForItem(it, new Date()).includes(tab)) return false;
+    if (tab === 'fu_overdue') {
+      if (followupState(it, new Date()).status !== 'overdue') return false;
+    } else if (tab && tab !== 'all' && !tabsForItem(it, new Date()).includes(tab)) {
+      return false;
+    }
     return true;
   });
 
@@ -204,7 +211,8 @@ router.get('/tab-counts', async (req, res) => {
      )
      SELECT r.lotus_id, r.cust_number,
             COALESCE(lm.direction,   r.last_message_from) AS last_message_from,
-            COALESCE(lm.received_at,  r.last_message_at)  AS last_message_at
+            COALESCE(lm.received_at,  r.last_message_at)  AS last_message_at,
+            lo.received_at AS last_outbound_at
      FROM recent r
      LEFT JOIN LATERAL (
        SELECT received_at, direction
@@ -212,7 +220,14 @@ router.get('/tab-counts', async (req, res) => {
        WHERE m.cust_number = r.cust_number
        ORDER BY received_at DESC NULLS LAST, id DESC
        LIMIT 1
-     ) lm ON true`
+     ) lm ON true
+     LEFT JOIN LATERAL (
+       SELECT received_at
+       FROM messages m
+       WHERE m.cust_number = r.cust_number AND m.direction = 'outbound'
+       ORDER BY received_at DESC NULLS LAST, id DESC
+       LIMIT 1
+     ) lo ON true`
   );
   const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
 
@@ -222,6 +237,8 @@ router.get('/tab-counts', async (req, res) => {
 
   const counts = { all: 0 };
   for (const k of TAB_KEYS) counts[k] = 0;
+  counts.fu_overdue = 0;
+  counts.fu_pending = 0;
 
   for (const c of contacts) {
     const s = stateMap.get(c.lotus_id) || {};
@@ -241,6 +258,10 @@ router.get('/tab-counts', async (req, res) => {
       snoozed_until: s.snoozed_until || null,
     };
     for (const k of tabsForItem(item, now)) counts[k] += 1;
+    item.last_outbound_at = c.last_outbound_at || null;
+    const fu = followupState(item, now);
+    if (fu.status === 'overdue') counts.fu_overdue += 1;
+    else if (fu.status === 'fresh' || fu.status === 'pending') counts.fu_pending += 1;
   }
 
   res.json({ success: true, counts });

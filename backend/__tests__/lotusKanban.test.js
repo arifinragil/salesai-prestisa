@@ -128,3 +128,40 @@ describe('GET /tab-counts', () => {
     expect(res.body.counts.all).toBe(1);
   });
 });
+
+describe('FU overdue (filter + counts)', () => {
+  const dAgo = (d) => new Date(Date.now() - d * 24 * 3600 * 1000).toISOString();
+
+  test('?tab=fu_overdue hanya lead yang FU-nya overdue', async () => {
+    stubData(
+      [
+        { lotus_id: 'A', cust_number: '1', last_message_from: 'outbound', last_message_at: dAgo(2) },
+        { lotus_id: 'B', cust_number: '2', last_message_from: 'inbound',  last_message_at: dAgo(0.1) },
+      ],
+      [
+        { lotus_id: 'A', status: 'active', assigned_staff_id: 7, first_inbound_at: dAgo(2) },
+        { lotus_id: 'B', status: 'active', assigned_staff_id: 7, first_inbound_at: dAgo(0.2) },
+      ]
+    );
+    const res = await request(appWith(ADMIN)).get('/api/lotus-inbox/contacts?tab=fu_overdue');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((i) => i.lotus_id)).toEqual(['A']);
+  });
+
+  test('/tab-counts memuat fu_overdue & fu_pending', async () => {
+    stubData(
+      [
+        { lotus_id: 'A', cust_number: '1', last_message_from: 'outbound', last_message_at: dAgo(2) },
+        { lotus_id: 'B', cust_number: '2', last_message_from: 'inbound',  last_message_at: dAgo(0.1) },
+      ],
+      [
+        { lotus_id: 'A', status: 'active', assigned_staff_id: 7, first_inbound_at: dAgo(2) },
+        { lotus_id: 'B', status: 'active', assigned_staff_id: 7, first_inbound_at: dAgo(0.2) },
+      ]
+    );
+    const res = await request(appWith(ADMIN)).get('/api/lotus-inbox/tab-counts');
+    expect(res.body.counts).toHaveProperty('fu_overdue', 1);
+    expect(res.body.counts).toHaveProperty('fu_pending');
+    expect(res.body.counts.fu_pending).toBeGreaterThanOrEqual(1);
+  });
+});
