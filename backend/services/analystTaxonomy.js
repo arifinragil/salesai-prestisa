@@ -14,6 +14,7 @@ const ENUMS = {
     'ekspektasi_design','area_pengiriman','timing_pengiriman','kompetitor',
     'ragu_kredibilitas','window_shopping','sudah_closing','bukan_lead','lainnya',
   ],
+  stuck_group: ['customer', 'sales', 'offer', 'proses'],
 };
 
 const INTERNAL_RC_VALID = ['A','B','C','D','E','F','G','H','I','J','K','L','M'];
@@ -56,6 +57,8 @@ function validateTierAOutput(raw) {
     product_solution_fit:            validBoolObj(raw.product_solution_fit, PRODUCT_FIT_KEYS),
     confidence:                      validEnum('confidence', raw.confidence) || 'medium',
     evidence_quote:                  typeof raw.evidence_quote === 'string' ? raw.evidence_quote.slice(0, 100) : null,
+    stuck_group:                     validEnum('stuck_group', raw.stuck_group),
+    stuck_issue:                     typeof raw.stuck_issue === 'string' ? raw.stuck_issue.slice(0, 80) : null,
   };
 }
 
