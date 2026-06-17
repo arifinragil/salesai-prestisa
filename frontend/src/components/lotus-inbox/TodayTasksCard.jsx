@@ -5,6 +5,8 @@ export default function TodayTasksCard({ counts = {}, onPick }) {
   const tunggu = counts.tunggu_balas || 0;
   const fuOverdue = counts.fu_overdue || 0;
   const fuPending = counts.fu_pending || 0;
+  const fuStale = counts.fu_stale || 0;
+  const fuActionable = fuOverdue + fuStale;
 
   return (
     <div className="space-y-3">
@@ -14,14 +16,15 @@ export default function TodayTasksCard({ counts = {}, onPick }) {
           <Chip n={urgent}  label="Urgent"        tone="rose"    onClick={() => onPick('urgent')} />
           <Chip n={baru}    label="Customer Baru" tone="emerald" onClick={() => onPick('customer_baru')} />
           <Chip n={tunggu}  label="Tunggu Balas"  tone="amber"   onClick={() => onPick('tunggu_balas')} />
+          <Chip n={fuStale} label="Lead Lama"     tone="slate"   onClick={() => onPick('fu_stale')} />
         </div>
       </div>
 
-      {fuOverdue > 0 ? (
-        <button onClick={() => onPick('fu_overdue')}
+      {fuActionable > 0 ? (
+        <button onClick={() => onPick(fuOverdue > 0 ? 'fu_overdue' : 'fu_stale')}
           className="w-full text-left bg-rose-600 text-white rounded-xl px-4 py-3 flex items-center justify-between">
           <span>
-            <span className="font-semibold">{fuOverdue} FU overdue — kerjakan sekarang!</span>
+            <span className="font-semibold">{fuOverdue} FU overdue · {fuStale} lead lama — kerjakan sekarang!</span>
             <span className="block text-xs text-rose-100 mt-0.5">{fuPending} FU pending (H+1/H+3/H+5)</span>
           </span>
           <span className="text-sm bg-white/20 px-3 py-1 rounded-lg whitespace-nowrap">Buka Tugas →</span>
@@ -41,6 +44,7 @@ const TONES = {
   rose: 'border-rose-200 text-rose-700',
   emerald: 'border-emerald-200 text-emerald-700',
   amber: 'border-amber-200 text-amber-700',
+  slate: 'border-slate-200 text-slate-600',
 };
 function Chip({ n, label, tone, onClick }) {
   return (
