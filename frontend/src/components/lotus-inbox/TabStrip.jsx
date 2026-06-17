@@ -7,6 +7,7 @@ const TABS = [
   { key: 'tunggu_balas',  label: 'Tunggu Balas',  icon: '⏰', tone: 'amber' },
   { key: 'mau_closing',   label: 'Mau Closing',   icon: '✅', tone: 'green' },
   { key: 'tunggu_cust',   label: 'Tunggu Cust',   icon: '🔁', tone: 'sky' },
+  { key: 'fu_overdue',    label: 'FU Overdue',    icon: '🔔', tone: 'rose' },
 ];
 
 export default function TabStrip({ tab, counts = {}, onChange }) {
