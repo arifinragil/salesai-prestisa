@@ -6,6 +6,7 @@ const lotus = require('../db/lotus');
 const { requireStaff } = require('../middleware/auth');
 const { followupState } = require('../services/lotusFollowup');
 const { classify } = require('../services/supervisorPriority');
+const { STUCK_GROUP_OF, bucketOfGroup } = require('../services/stuckGroup');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -42,6 +43,12 @@ router.post('/lead/:lotus_id/action', async (req, res, next) => {
       await pg.query(
         `UPDATE crm_lotus_state SET supervisor_ack_at = now(), supervisor_ack_by = $2 WHERE lotus_id = $1`,
         [lotus_id, req.staff.staff_id]
+      );
+    }
+    if (action === 'revise_ai' && corrected_root_cause) {
+      await pg.query(
+        `UPDATE crm_lotus_state SET root_cause_tag = $2, stuck_group = $3, stuck_issue = COALESCE($4, stuck_issue) WHERE lotus_id = $1`,
+        [lotus_id, corrected_root_cause, STUCK_GROUP_OF(corrected_root_cause), corrected_reason || null]
       );
     }
     res.json({ ok: true, id: ins.rows[0].id });
@@ -118,12 +125,18 @@ router.get('/panel', async (req, res, next) => {
         asked_price: PRICE_RE.test(String(c.last_message || '')),
       };
       const cls = classify(lead);
+      let stuck_bucket = cls.stuck_bucket, stuck_label = cls.stuck_label, groups = cls.groups;
+      if (s.stuck_group) {
+        stuck_bucket = bucketOfGroup(s.stuck_group);
+        stuck_label = s.stuck_issue || s.stuck_group;
+        if (!groups.includes('lead_stuck')) groups = [...groups, 'lead_stuck'];
+      }
       items.push({
         lotus_id: c.lotus_id, cust_name: c.cust_name, pic_name: c.assign_to_user_name || null,
         lead_in_at: firstInbound, last_message: c.last_message,
         last_message_from: c.last_message_from, last_message_at: c.last_message_at,
         awaiting_min: lead.awaiting_sales_reply_min ?? lead.awaiting_customer_reply_min, status: lead.status,
-        priority: cls.priority, groups: cls.groups, stuck_bucket: cls.stuck_bucket, stuck_label: cls.stuck_label,
+        priority: cls.priority, groups, stuck_bucket, stuck_label,
         fu_status: fu.status, fu_current_cycle: fu.current_cycle, fu_count_today: Number(c.fu_count_today) || 0,
         last_outbound_at: c.last_outbound_at, never_responded: lead.never_responded,
         root_cause_tag: s.root_cause_tag, funnel_stage_lost: s.funnel_stage_lost, lead_status: s.lead_status,

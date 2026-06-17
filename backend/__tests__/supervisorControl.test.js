@@ -39,11 +39,25 @@ describe('POST /lead/:id/action', () => {
     expect(pg.query.mock.calls[1][0]).toMatch(/UPDATE crm_lotus_state/i);
   });
 
-  test('revise_ai: insert log saja (tanpa update ack)', async () => {
-    pg.query.mockResolvedValueOnce({ rows: [{ id: 11 }] });
+  test('revise_ai: insert log + update root_cause/stuck_group (tanpa update ack)', async () => {
+    pg.query
+      .mockResolvedValueOnce({ rows: [{ id: 11 }] })   // INSERT log
+      .mockResolvedValueOnce({ rowCount: 1 });           // UPDATE crm_lotus_state root_cause
     const res = await request(appWith(ADMIN))
       .post('/api/supervisor-control/lead/L1/action')
       .send({ action: 'revise_ai', corrected_root_cause: 'harga_terlalu_mahal', corrected_reason: 'budget kecil', final_status: 'lost', note: 'sales kirim harga terlalu cepat' });
+    expect(res.status).toBe(200);
+    expect(pg.query).toHaveBeenCalledTimes(2);
+    expect(pg.query.mock.calls[0][0]).toMatch(/INSERT INTO crm_lead_supervisor_actions/i);
+    expect(pg.query.mock.calls[1][0]).toMatch(/UPDATE crm_lotus_state/i);
+    expect(pg.query.mock.calls[1][0]).toMatch(/stuck_group/i);
+  });
+
+  test('revise_ai sem corrected_root_cause: insert log saja', async () => {
+    pg.query.mockResolvedValueOnce({ rows: [{ id: 12 }] });
+    const res = await request(appWith(ADMIN))
+      .post('/api/supervisor-control/lead/L1/action')
+      .send({ action: 'revise_ai', note: 'tinjau ulang' });
     expect(res.status).toBe(200);
     expect(pg.query).toHaveBeenCalledTimes(1);
     expect(pg.query.mock.calls[0][0]).toMatch(/INSERT INTO crm_lead_supervisor_actions/i);
