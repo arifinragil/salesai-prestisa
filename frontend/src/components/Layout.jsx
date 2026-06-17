@@ -5,6 +5,7 @@ import { useUser } from '@/lib/useUser';
 import { api } from '@/lib/api';
 import MessageSearch from './MessageSearch';
 import NotificationsBell from './NotificationsBell';
+import PageGuide from './PageGuide';
 
 const navItems = [
   { href: '/inbox',             label: 'Inbox',      icon: '💬' },
@@ -327,6 +328,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
       </nav>
 
       <MessageSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <PageGuide />
     </div>
   );
 }
