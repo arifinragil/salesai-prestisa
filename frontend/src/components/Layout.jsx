@@ -21,6 +21,7 @@ const navItems = [
   { href: '/ai-monitor',        label: 'Monitor',    icon: '📡' },
   { href: '/ai-settings',       label: 'Persona',    icon: '🤖' },
   { href: '/knowledge',         label: 'Knowledge',  icon: '📚' },
+  { href: '/qna', label: 'Q&A AI', icon: '💡', adminOnly: true },
   { href: '/reply-templates',   label: 'Templates',  icon: '📝' },
   { href: '/tags',              label: 'Tags',       icon: '🏷️' },
   { href: '/promos',            label: 'Promo',      icon: '🎁' },
