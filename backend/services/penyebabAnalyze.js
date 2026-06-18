@@ -13,6 +13,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const lotusPg = require('../db/lotus');
 const pg = require('../db/postgres');
+const { isClosingPhone } = require('./orderMatch');
 const {
   ISSUE_TREE_DETAIL,
   normalizeIssueTag,
@@ -125,6 +126,10 @@ async function analyzeLead(lotus_id) {
   if (!contactRes.rows.length) throw new Error(`lotus_id not found: ${lotus_id}`);
   const { cust_number, business_number } = contactRes.rows[0];
 
+  // is_closing is determined by the POS, not the LLM: did this phone place a
+  // real (non-cancelled) order? Overrides the unreliable parsed.is_closing.
+  const is_closing = await isClosingPhone(cust_number);
+
   // 2. Build transcript (oldest→newest, cap 40 newest, label like the cron)
   const msgRes = await lotusPg.query(
     `SELECT direction, body, received_at, cs_name, cs_id
@@ -206,7 +211,7 @@ async function analyzeLead(lotus_id) {
      RETURNING *`,
     [
       lotus_id, cust_number, business_number,
-      parsed.is_closing, parsed.churn,
+      is_closing, parsed.churn,
       parsed.issue, parsed.sub_issue, parsed.rinci,
       parsed.penyebab_tidak_closing,
       JSON.stringify(parsed.analisa),

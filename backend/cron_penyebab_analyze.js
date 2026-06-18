@@ -12,6 +12,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const pg = require('./db/postgres');
 const lotusPg = require('./db/lotus');
 const { analyzeLead } = require('./services/penyebabAnalyze');
+const { getClosingPhoneSet, normalizePhone } = require('./services/orderMatch');
 
 const CONCURRENCY = 4;
 const SLEEP_MS = 200;
@@ -80,7 +81,20 @@ async function findCandidates() {
     return cnt >= MIN_INBOUND;
   });
 
-  return qualified.slice(0, SAFETY_LIMIT);
+  if (!qualified.length) return [];
+
+  // "Tidak closing" = the phone has NO real (non-cancelled) order in the POS.
+  // Drop any contact whose phone closed — we only analyze non-closing leads.
+  const closingSet = await getClosingPhoneSet(qualified.map(c => c.cust_number));
+  const nonClosing = qualified.filter(c => {
+    const n = normalizePhone(c.cust_number);
+    return n != null && !closingSet.has(n);
+  });
+  console.log(
+    `penyebab_analyze: ${qualified.length} qualified, ${qualified.length - nonClosing.length} closed (skipped), ${nonClosing.length} non-closing`
+  );
+
+  return nonClosing.slice(0, SAFETY_LIMIT);
 }
 
 async function run() {
