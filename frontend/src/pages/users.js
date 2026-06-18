@@ -28,7 +28,7 @@ export default function UsersPage() {
     try {
       await api(`/api/users/${u.id}`, {
         method: 'PUT',
-        body: { full_name: u.full_name, role: u.role, active: u.active },
+        body: { full_name: u.full_name, role: u.role, active: u.active, role_locked: u.role_locked },
       });
       toast.success('Disimpan');
       setEditing(null);
@@ -113,11 +113,21 @@ export default function UsersPage() {
                     </td>
                     <td className="px-3 py-2">
                       {isEditing
-                        ? <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}
-                            className="text-xs px-1 py-0.5 border border-slate-200 rounded">
-                            <option value="admin">admin</option><option value="operator">operator</option><option value="acquisition">acquisition</option><option value="acquisition_manager">acquisition manager</option><option value="retention">retention</option><option value="viewer">viewer</option>
-                          </select>
-                        : <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">{u.role}</span>}
+                        ? <div className="space-y-1">
+                            <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}
+                              className="text-xs px-1 py-0.5 border border-slate-200 rounded">
+                              <option value="admin">admin</option><option value="operator">operator</option><option value="acquisition">acquisition</option><option value="acquisition_manager">acquisition manager</option><option value="retention">retention</option><option value="viewer">viewer</option>
+                            </select>
+                            <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+                              <input type="checkbox" checked={!!editing.role_locked}
+                                onChange={(e) => setEditing({ ...editing, role_locked: e.target.checked })} />
+                              🔒 Kunci role (jangan timpa dari Authentik)
+                            </label>
+                          </div>
+                        : <div className="flex items-center gap-1">
+                            <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">{u.role}</span>
+                            {u.role_locked && <span title="Role dikunci — Authentik tidak akan menimpa">🔒</span>}
+                          </div>}
                     </td>
                     <td className="px-3 py-2">
                       {isEditing
