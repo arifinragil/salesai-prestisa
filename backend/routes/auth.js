@@ -2,6 +2,7 @@ const express = require('express');
 const pg = require('../db/postgres');
 const { verifyPassword } = require('../services/password');
 const { signToken, setAuthCookie, clearAuthCookie, requireStaff } = require('../middleware/auth');
+const settingsSvc = require('../services/settings');
 
 const router = express.Router();
 
@@ -35,7 +36,10 @@ router.get('/me', requireStaff, async (req, res) => {
     [req.staff.staff_id]
   );
   if (!rows[0]) return res.status(401).json({ success: false, message: 'Akun tidak ditemukan' });
-  res.json({ success: true, user: rows[0] });
+  // Menu-access matrix { role: [href, ...] } — frontend computes visible nav from it.
+  // Not sensitive (just menu visibility), so returned to every logged-in user.
+  const menuAccess = (await settingsSvc.getSetting('menu_access', {})) || {};
+  res.json({ success: true, user: { ...rows[0], menu_access: menuAccess } });
 });
 
 module.exports = router;

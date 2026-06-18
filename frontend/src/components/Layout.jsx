@@ -6,31 +6,7 @@ import { api } from '@/lib/api';
 import MessageSearch from './MessageSearch';
 import NotificationsBell from './NotificationsBell';
 import PageGuide from './PageGuide';
-
-const navItems = [
-  { href: '/inbox',             label: 'Inbox',      icon: '💬' },
-  { href: '/lotus-inbox',       label: 'Lotus Inbox',icon: '🪷' },
-  { href: '/customer',          label: 'Customer',   icon: '🎫' },
-  { href: '/tax-requests',      label: 'Faktur Pajak', icon: '🧾' },
-  { href: '/pipeline',          label: 'Pipeline',   icon: '📊' },
-  { href: '/tasks',             label: 'Tasks',      icon: '✅' },
-  { href: '/supervisor',        label: 'Supervisor', icon: '👁',  adminOnly: true },
-  { href: '/supervisor-control', label: 'Supervisor Control', icon: '👁‍🗨', adminOnly: true },
-  { href: '/lead-distribution', label: 'Leads',      icon: '🎯', adminOnly: true },
-  { href: '/retention',         label: 'Retention',  icon: '🔁', adminOnly: true },
-  { href: '/b2b-outreach',      label: 'B2B Outreach', icon: '🏢', adminOnly: true },
-  { href: '/ai-monitor',        label: 'Monitor',    icon: '📡' },
-  { href: '/ai-settings',       label: 'Persona',    icon: '🤖' },
-  { href: '/knowledge',         label: 'Knowledge',  icon: '📚' },
-  { href: '/qna', label: 'Q&A AI', icon: '💡', adminOnly: true },
-  { href: '/reply-templates',   label: 'Templates',  icon: '📝' },
-  { href: '/tags',              label: 'Tags',       icon: '🏷️' },
-  { href: '/promos',            label: 'Promo',      icon: '🎁' },
-  { href: '/sql-queries',       label: 'SQL',        icon: '🗄' },
-  { href: '/users',             label: 'Users',      icon: '👤' },
-  { href: '/snippets',          label: 'Snippets',   icon: '✂️' },
-  { href: '/channel-settings',  label: 'Channel',    icon: '🔌', adminOnly: true },
-];
+import { navItems, visibleNavFor } from '@/lib/menuCatalog';
 
 function isActive(pathname, href) {
   if (pathname === href) return true;
@@ -104,7 +80,7 @@ export default function Layout({ children, title = 'Tiara CRM' }) {
   }
   if (unauthenticated || !user) return null;
 
-  const visibleNav = navItems.filter((it) => !it.adminOnly || user?.role === 'admin');
+  const visibleNav = visibleNavFor(user);
 
   return (
     <div className="h-screen flex flex-col">
