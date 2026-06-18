@@ -23,6 +23,7 @@ export const navItems = [
   { href: '/sql-queries',       label: 'SQL',        icon: '🗄' },
   { href: '/users',             label: 'Users',      icon: '👤' },
   { href: '/snippets',          label: 'Snippets',   icon: '✂️' },
+  { href: '/analisa-tidak-closing', label: 'Analisa Closing', icon: '🔬', adminOnly: true },
   { href: '/channel-settings',  label: 'Channel',    icon: '🔌', adminOnly: true },
   { href: '/menu-access',       label: 'Menu Access', icon: '🔐', adminOnly: true },
 ];
