@@ -1,12 +1,16 @@
 // User management — admin only. CRUD on staff_users + heartbeat presence + claims.
 const express = require('express');
 const pg = require('../db/postgres');
-const { requireStaff } = require('../middleware/auth');
+const { requireStaff, AUTHENTIK_GROUP_ROLE_MAP, DEFAULT_ROLE_FROM_AUTHENTIK } = require('../middleware/auth');
 const { hashPassword } = require('../services/password');
 const settings = require('../services/settings');
 
 const router = express.Router();
 router.use(requireStaff);
+
+// Valid CRM roles = admin + all Authentik-mapped roles + the default fallback.
+// Derived so it auto-includes new roles (e.g. acquisition_manager) without edits.
+const VALID_ROLES = [...new Set(['admin', ...AUTHENTIK_GROUP_ROLE_MAP.map(([, r]) => r), DEFAULT_ROLE_FROM_AUTHENTIK])];
 
 function requireAdmin(req, res, next) {
   if (req.staff?.role !== 'admin') return res.status(403).json({ success: false, message: 'admin only' });
@@ -75,7 +79,7 @@ router.get('/', requireAdmin, async (_req, res) => {
 router.post('/', requireAdmin, async (req, res) => {
   const { username, password, full_name, role } = req.body || {};
   if (!username || !password) return res.status(400).json({ success: false, message: 'username + password required' });
-  if (!['admin','operator','viewer'].includes(role)) return res.status(400).json({ success: false, message: 'role must be admin|operator|viewer' });
+  if (!VALID_ROLES.includes(role)) return res.status(400).json({ success: false, message: 'role must be one of: ' + VALID_ROLES.join('|') });
   if (String(password).length < 6) return res.status(400).json({ success: false, message: 'password min 6 chars' });
   const hash = await hashPassword(String(password));
   try {
@@ -97,7 +101,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
   const { full_name, role, active } = req.body || {};
-  if (role && !['admin','operator','viewer'].includes(role)) return res.status(400).json({ success: false, message: 'bad role' });
+  if (role && !VALID_ROLES.includes(role)) return res.status(400).json({ success: false, message: 'role must be one of: ' + VALID_ROLES.join('|') });
   await pg.query(
     `UPDATE staff_users SET
        full_name = COALESCE($2, full_name),
