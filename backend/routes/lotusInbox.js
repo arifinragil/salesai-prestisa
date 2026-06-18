@@ -418,8 +418,30 @@ router.get('/contacts/:lotus_id/messages', async (req, res) => {
   if (!contact) return res.status(404).json({ success: false, message: 'not found' });
 
   const params = [contact.cust_number];
+
+  // Outbound HSM/auto-reply rows from the external Lotus writer store a naive
+  // (no-timezone) receivedAt string, which Postgres reads under the Asia/Jakarta
+  // session TZ and lands 7h early. Re-interpret that naive string as UTC at read
+  // time. Inbound (carries Z) and epoch-millis outbound are untouched. The shared
+  // column is also corrected by backfill_outbound_tz.js; this keeps the thread
+  // right for new bad rows that keep arriving until the source writer is fixed.
+  const EFF_RECV = `(CASE
+        WHEN direction = 'outbound'
+         AND (raw_doc->>'receivedAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?$'
+        THEN ((raw_doc->>'receivedAt')||'Z')::timestamptz
+        ELSE received_at END)`;
+  // Auto-reply/HSM outbound is second-truncated (ms=000). A bot reply in the same
+  // second as the triggering inbound would otherwise sort *before* it. Bump such
+  // second-precision outbound to .999 of its second so the customer message (real
+  // sub-second ms) always renders first. Real-ms agent sends are unaffected.
+  const ORD_TS = `(CASE
+        WHEN direction = 'outbound'
+         AND (extract(milliseconds from ${EFF_RECV})::int % 1000) = 0
+        THEN ${EFF_RECV} + interval '999 milliseconds'
+        ELSE ${EFF_RECV} END)`;
+
   let cursor = '';
-  if (before) { params.push(before); cursor = `AND received_at < $${params.length}`; }
+  if (before) { params.push(before); cursor = `AND ${EFF_RECV} < $${params.length}`; }
 
   // Match by cust_number (inbound + correctly-tailed outbound) OR, for outbound
   // rows where the historical lotus-tailer stored cust_number = business number,
@@ -427,10 +449,10 @@ router.get('/contacts/:lotus_id/messages', async (req, res) => {
   // outbound messages are invisible in the thread (only inbound shows).
   const { rows } = await lotus.query(
     `SELECT id, lotus_id, message_id, direction, body, message_type, channel,
-            cs_id, cs_name, hsm_name, received_at, created_at, raw_doc
+            cs_id, cs_name, hsm_name, ${EFF_RECV} AS received_at, created_at, raw_doc
      FROM messages
      WHERE (cust_number = $1 OR (direction = 'outbound' AND raw_doc->'message'->>'to' = $1)) ${cursor}
-     ORDER BY received_at DESC NULLS LAST, id DESC
+     ORDER BY ${ORD_TS} DESC NULLS LAST, id DESC
      LIMIT ${limit + 1}`,
     params
   );
