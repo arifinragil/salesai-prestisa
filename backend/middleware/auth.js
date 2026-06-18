@@ -65,22 +65,24 @@ async function provisionFromAuthentik(req) {
   const role = mapRole(groups);
 
   // Lookup by authentik_uid first (stable), then by username (legacy)
-  let r = await pg.query(`SELECT id, username, role, active FROM staff_users WHERE authentik_uid = $1 LIMIT 1`, [uid]);
+  let r = await pg.query(`SELECT id, username, role, active, role_locked FROM staff_users WHERE authentik_uid = $1 LIMIT 1`, [uid]);
   if (!r.rows[0]) {
-    r = await pg.query(`SELECT id, username, role, active FROM staff_users WHERE username = $1 LIMIT 1`, [username]);
+    r = await pg.query(`SELECT id, username, role, active, role_locked FROM staff_users WHERE username = $1 LIMIT 1`, [username]);
   }
 
   if (r.rows[0]) {
     // Existing user — update role + bind authentik_uid + last seen
+    // If role_locked, keep the existing DB role instead of the Authentik-mapped role.
     const u = r.rows[0];
+    const effectiveRole = u.role_locked ? u.role : role;
     await pg.query(
       `UPDATE staff_users
          SET role = $2, authentik_uid = $3, full_name = COALESCE(NULLIF($4,''), full_name),
              active = TRUE, last_seen_at = now()
        WHERE id = $1`,
-      [u.id, role, uid, fullName || '']
+      [u.id, effectiveRole, uid, fullName || '']
     );
-    return { staff_id: u.id, username, role };
+    return { staff_id: u.id, username, role: effectiveRole };
   }
 
   // New user — auto-create with placeholder password (Authentik handles auth)
