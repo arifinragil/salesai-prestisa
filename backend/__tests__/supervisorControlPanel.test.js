@@ -24,12 +24,17 @@ describe('GET /panel', () => {
   });
 
   test('rakit priority_queue + groups', async () => {
-    lotus.query.mockResolvedValue({ rows: [
-      { lotus_id: 'A', cust_number: '1', cust_name: 'Ani', business_number: '628',
-        last_message: 'harganya brp kak?', last_message_from: 'inbound', last_message_at: minAgo(20),
-        last_inbound_at: minAgo(20), last_outbound_at: null, first_inbound_at: minAgo(20),
-        inbound_count: 1, fu_count_today: 0, assign_to_user_name: 'Rina' },
-    ] });
+    // First call: main panel query; subsequent calls: promise pass query
+    lotus.query
+      .mockResolvedValueOnce({ rows: [
+        { lotus_id: 'A', cust_number: '1', cust_name: 'Ani', business_number: '628',
+          last_message: 'harganya brp kak?', last_message_from: 'inbound', last_message_at: minAgo(20),
+          last_inbound_at: minAgo(20), last_outbound_at: null, first_inbound_at: minAgo(20),
+          inbound_count: 1, fu_count_today: 0, assign_to_user_name: 'Rina',
+          // New columns from extended LATERAL joins
+          last_in_len: 15, last_out_human_at: null, last_in_at: minAgo(20), fu_times_today: [] },
+      ] })
+      .mockResolvedValueOnce({ rows: [] }); // promise pass returns no promises
     pg.query.mockResolvedValue({ rows: [
       { lotus_id: 'A', status: 'active', assigned_staff_id: 7, root_cause_tag: null, funnel_stage_lost: null,
         lead_temperature: 'warm', lead_score: 10, last_intent: 'tanya_harga' },
@@ -41,5 +46,10 @@ describe('GET /panel', () => {
     expect(a).toBeTruthy();
     expect(a.priority).toBe('P1');
     expect(res.body.groups.sales_response_risk.map((x) => x.lotus_id)).toContain('A');
+    // New sub-section keys
+    expect(Array.isArray(res.body.responseRisk.salesPromiseBroken)).toBe(true);
+    expect(res.body.followUp).toHaveProperty('pendingFuByCycle');
+    expect(res.body.leadStuckByCategory).toHaveProperty('uncategorized');
+    expect(res.body.priority).toHaveProperty('p1Items');
   });
 });

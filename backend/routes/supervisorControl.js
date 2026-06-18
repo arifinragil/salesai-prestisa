@@ -7,6 +7,9 @@ const { requireStaff } = require('../middleware/auth');
 const { followupState } = require('../services/lotusFollowup');
 const { classify } = require('../services/supervisorPriority');
 const { STUCK_GROUP_OF, bucketOfGroup } = require('../services/stuckGroup');
+const S = require('../services/supervisorSubsections');
+const { promiseSql, PROMISE_RE, mapPromiseRow } = require('../services/salesPromise');
+const { expectedCycle } = require('../services/followupHariH');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -89,14 +92,28 @@ router.get('/panel', async (req, res, next) => {
               lo.received_at  AS last_outbound_at,
               fo.received_at  AS first_outbound_at,
               COALESCE(ic.n, 0) AS inbound_count,
-              COALESCE(ft.n, 0) AS fu_count_today
+              COALESCE(ft.n, 0) AS fu_count_today,
+              COALESCE(lib.len,0) AS last_in_len,
+              gh.last_out_human AS last_out_human_at,
+              lia.last_in_at AS last_in_at,
+              fud.fu AS fu_times_today
        FROM recent r
        LEFT JOIN LATERAL (SELECT received_at, direction FROM messages m WHERE m.cust_number=r.cust_number ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lm ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fim ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lo ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fo ON true
        LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound') ic ON true
-       LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.received_at::date = now()::date) ft ON true`
+       LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.received_at::date = now()::date) ft ON true
+       LEFT JOIN LATERAL (SELECT length(COALESCE(m.body,'')) AS len FROM messages m
+         WHERE m.cust_number=r.cust_number AND m.direction='inbound'
+         ORDER BY m.received_at DESC NULLS LAST, id DESC LIMIT 1) lib ON true
+       LEFT JOIN LATERAL (SELECT MAX(m.received_at) AS last_out_human FROM messages m
+         WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.cs_id IS NOT NULL) gh ON true
+       LEFT JOIN LATERAL (SELECT MAX(m.received_at) AS last_in_at FROM messages m
+         WHERE m.cust_number=r.cust_number AND m.direction='inbound') lia ON true
+       LEFT JOIN LATERAL (SELECT array_agg(m.received_at ORDER BY m.received_at) AS fu FROM messages m
+         WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.cs_id IS NOT NULL
+           AND m.received_at::date = now()::date) fud ON true`
     );
     const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
     const now = new Date();
@@ -111,6 +128,11 @@ router.get('/panel', async (req, res, next) => {
       const inbound = /^(in|customer)/i.test(String(c.last_message_from || ''));
       const firstInbound = s.first_inbound_at || c.first_inbound_at;
       const fu = followupState({ first_inbound_at: firstInbound, last_outbound_at: c.last_outbound_at }, now);
+      const hoursSinceH = (ts) => ts ? (now.getTime() - new Date(ts).getTime()) / 3600000 : null;
+      const lastInAfterOut = c.last_in_at && (!c.last_out_human_at || new Date(c.last_in_at) > new Date(c.last_out_human_at));
+      const ghostHours = (c.last_out_human_at && (!c.last_in_at || new Date(c.last_in_at) < new Date(c.last_out_human_at)))
+        ? hoursSinceH(c.last_out_human_at) : null;
+      const expCycle = expectedCycle({ first_inbound_at: firstInbound, fu_times: c.fu_times_today || [] }, now);
       const lead = {
         status: s.status || 'active',
         never_responded: !c.last_outbound_at,
@@ -142,6 +164,16 @@ router.get('/panel', async (req, res, next) => {
         root_cause_tag: s.root_cause_tag, funnel_stage_lost: s.funnel_stage_lost, lead_status: s.lead_status,
         controllability: s.controllability, sales_handling: s.sales_handling, evidence_quote: s.evidence_quote,
         analyst_report_generated_at: s.analyst_report_generated_at,
+        // New sub-section fields
+        last_in_len: Number(c.last_in_len) || 0,
+        last_in_after_out: lastInAfterOut,
+        ghost_hours: ghostHours,
+        expected_cycle: expCycle,
+        no_reply_yet: lead.never_responded && !!c.first_inbound_at,
+        first_response_lag_min: lead.first_response_lag_min,
+        awaiting_sales_reply_min: lead.awaiting_sales_reply_min,
+        awaiting_customer_reply_min: lead.awaiting_customer_reply_min,
+        inbound_count: Number(c.inbound_count) || 0,
       });
     }
 
@@ -157,6 +189,7 @@ router.get('/panel', async (req, res, next) => {
     }
     // True counts sebelum di-cap; tampilan dibatasi CAP baris/list agar panel ringan & fokus.
     const CAP = 50;
+    const capN = (arr) => arr.slice(0, CAP);
     const group_counts = {
       sales_response_risk: groups.sales_response_risk.length,
       follow_up: groups.follow_up.length,
@@ -166,12 +199,63 @@ router.get('/panel', async (req, res, next) => {
     groups.follow_up = groups.follow_up.slice(0, CAP);
     for (const k of ['A', 'B', 'C', 'D']) groups.lead_stuck[k] = groups.lead_stuck[k].slice(0, CAP);
 
+    // Promise pass + new sub-section grouping (runs after CAP is declared)
+    const byLotus = new Map(contacts.map((c) => [c.lotus_id, c]));
+    const custNumbers = contacts.map((c) => c.cust_number).filter(Boolean);
+    let promiseByCust = new Map();
+    if (custNumbers.length) {
+      const { rows: pr } = await lotus.query(promiseSql(), [custNumbers, PROMISE_RE.source]);
+      const cByCust = new Map(contacts.map((c) => [c.cust_number, c]));
+      promiseByCust = new Map(pr.map((row) => {
+        const c = cByCust.get(row.cust_number) || {};
+        return [row.cust_number, mapPromiseRow({ ...row, lotus_id: c.lotus_id, cust_name: c.cust_name, assign_to_user_name: c.assign_to_user_name }, now)];
+      }));
+    }
+    const responseRisk = { customerWaiting: [], slowFirstResponse: [], salesPromiseBroken: [] };
+    const followUp = { customerGhost: [], bubbleChat: [], pendingFuByCycle: { 1: [], 2: [], 3: [] } };
+    const leadStuckByCategory = { A: [], B: [], C: [], D: [], uncategorized: [] };
+    for (const i of items) {
+      if (S.isCustomerWaiting(i)) responseRisk.customerWaiting.push(i);
+      const sfr = S.slowFirstResponse(i); if (sfr) responseRisk.slowFirstResponse.push(i);
+      if (S.isCustomerGhost(i)) followUp.customerGhost.push(i);
+      if (S.isBubbleChat(i)) followUp.bubbleChat.push(i);
+      if (i.expected_cycle) followUp.pendingFuByCycle[i.expected_cycle].push(i);
+      const cust = byLotus.get(i.lotus_id);
+      const p = cust && promiseByCust.get(cust.cust_number);
+      if (p) responseRisk.salesPromiseBroken.push({ ...i, ...p });
+      if (i.groups.includes('lead_stuck')) {
+        if (i.stuck_bucket) leadStuckByCategory[i.stuck_bucket].push(i);
+        else leadStuckByCategory.uncategorized.push(i);
+      }
+    }
+    const p1Items = {
+      customerWaitingCritical: responseRisk.customerWaiting.length,
+      leadNoReply: responseRisk.slowFirstResponse.filter((i) => i.no_reply_yet).length,
+      salesPromiseBroken: responseRisk.salesPromiseBroken.length,
+    };
+    const p2Items = {
+      customerGhost: followUp.customerGhost.length,
+      fuCycleIncomplete: followUp.pendingFuByCycle[1].length + followUp.pendingFuByCycle[2].length + followUp.pendingFuByCycle[3].length,
+      leadStuck: ['A', 'B', 'C', 'D', 'uncategorized'].reduce((a, k) => a + leadStuckByCategory[k].length, 0),
+    };
+    const p3Items = {
+      bubbleChat: followUp.bubbleChat.length,
+      slowFirstResponseMild: responseRisk.slowFirstResponse.filter((i) => !i.no_reply_yet).length,
+    };
+    const sumv = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+
     res.json({
       priority_queue: priority_queue.slice(0, CAP), groups,
       counts: { P1: priority_queue.filter((i) => i.priority === 'P1').length,
                 P2: priority_queue.filter((i) => i.priority === 'P2').length,
                 P3: priority_queue.filter((i) => i.priority === 'P3').length,
                 total: items.length, queue_total: priority_queue.length, groups: group_counts, cap: CAP },
+      responseRisk: { customerWaiting: capN(responseRisk.customerWaiting), slowFirstResponse: capN(responseRisk.slowFirstResponse), salesPromiseBroken: capN(responseRisk.salesPromiseBroken) },
+      followUp: { customerGhost: capN(followUp.customerGhost), bubbleChat: capN(followUp.bubbleChat),
+        pendingFuByCycle: { 1: capN(followUp.pendingFuByCycle[1]), 2: capN(followUp.pendingFuByCycle[2]), 3: capN(followUp.pendingFuByCycle[3]) } },
+      leadStuckByCategory: Object.fromEntries(Object.entries(leadStuckByCategory).map(([k, v]) => [k, capN(v)])),
+      priority: { p1: sumv(p1Items), p1Items, p2: sumv(p2Items), p2Items, p3: sumv(p3Items), p3Items, total: sumv(p1Items) + sumv(p2Items) + sumv(p3Items) },
+      generatedAt: new Date().toISOString(),
     });
   } catch (e) { next(e); }
 });
