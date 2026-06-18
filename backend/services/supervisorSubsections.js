@@ -17,7 +17,8 @@ function isCustomerGhost(lead) {
 function isBubbleChat(lead) {
   return Number(lead.inbound_count) === 1
     && (lead.last_in_len || 0) < 50
-    && (lead.awaiting_customer_reply_min || 0) > 60;
+    && (lead.awaiting_customer_reply_min || 0) > 60
+    && !lead.last_in_is_reaction;
 }
 
 module.exports = { isCustomerWaiting, slowFirstResponse, isCustomerGhost, isBubbleChat };

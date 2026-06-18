@@ -98,18 +98,18 @@ router.get('/panel', async (req, res, next) => {
               COALESCE(ic.n, 0) AS inbound_count,
               COALESCE(ft.n, 0) AS fu_count_today,
               COALESCE(lib.len,0) AS last_in_len,
+              lib.body AS last_in_body,
               gh.last_out_human AS last_out_human_at,
               lia.last_in_at AS last_in_at,
-              fud.fu AS fu_times_today,
-              lm.body AS last_msg_body
+              fud.fu AS fu_times_today
        FROM recent r
-       LEFT JOIN LATERAL (SELECT received_at, direction, body FROM messages m WHERE m.cust_number=r.cust_number ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lm ON true
+       LEFT JOIN LATERAL (SELECT received_at, direction FROM messages m WHERE m.cust_number=r.cust_number ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lm ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fim ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lo ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fo ON true
        LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound') ic ON true
        LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.received_at::date = now()::date) ft ON true
-       LEFT JOIN LATERAL (SELECT length(COALESCE(m.body,'')) AS len FROM messages m
+       LEFT JOIN LATERAL (SELECT length(COALESCE(m.body,'')) AS len, m.body AS body FROM messages m
          WHERE m.cust_number=r.cust_number AND m.direction='inbound'
          ORDER BY m.received_at DESC NULLS LAST, id DESC LIMIT 1) lib ON true
        LEFT JOIN LATERAL (SELECT MAX(m.received_at) AS last_out_human FROM messages m
@@ -135,7 +135,10 @@ router.get('/panel', async (req, res, next) => {
       const fu = followupState({ first_inbound_at: firstInbound, last_outbound_at: c.last_outbound_at }, now);
       const hoursSinceH = (ts) => ts ? (now.getTime() - new Date(ts).getTime()) / 3600000 : null;
       const lastInAfterOut = c.last_in_at && (!c.last_out_human_at || new Date(c.last_in_at) > new Date(c.last_out_human_at));
-      const lastInIsReaction = lastInAfterOut && REACTION_RE.test(String(c.last_msg_body || ''));
+      // Reaction/sticker placeholder on the customer's last inbound message — not a
+      // real question. Excluded from Customer Waiting and Bubble Chat. Ungated so it
+      // also catches bubbles where sales already replied.
+      const lastInIsReaction = REACTION_RE.test(String(c.last_in_body || ''));
       const ghostHours = (c.last_out_human_at && (!c.last_in_at || new Date(c.last_in_at) < new Date(c.last_out_human_at)))
         ? hoursSinceH(c.last_out_human_at) : null;
       const expCycle = expectedCycle({ first_inbound_at: firstInbound, fu_times: c.fu_times_today || [] }, now);
