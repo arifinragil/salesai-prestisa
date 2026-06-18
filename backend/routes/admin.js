@@ -30,12 +30,33 @@ const ALLOWED_SETTING_KEYS = new Set([
   'claim_lease_minutes',
   'spam_filter_enabled',
   'ai_mode',                          // auto | copilot
+  'channel_settings',                 // WhatsApp channel: provider + webhook URLs + meta creds
+  'menu_access',                      // RBAC menu visibility: { role: [menu_href, ...] }
 ]);
+
+const CHANNEL_SECRET_FIELDS = ['meta_access_token', 'meta_app_secret', 'meta_verify_token', 'waha_api_key', 'webhook_secret'];
+
+function maskChannelSettings(v) {
+  if (!v || typeof v !== 'object') return v;
+  const out = { ...v };
+  for (const f of CHANNEL_SECRET_FIELDS) {
+    if (out[f]) {
+      const s = String(out[f]);
+      out[f] = { set: true, preview: s.length > 8 ? s.slice(0, 4) + '…' + s.slice(-4) : '***' };
+    } else {
+      out[f] = { set: false, preview: null };
+    }
+  }
+  return out;
+}
 
 router.get('/settings', async (_req, res) => {
   const items = await settingsSvc.listSettings();
   // Mask api_keys in ai_credentials before returning
   const masked = items.map((it) => {
+    if (it.key === 'channel_settings' && it.value && typeof it.value === 'object') {
+      return { ...it, value: maskChannelSettings(it.value) };
+    }
     if (it.key === 'ai_credentials' && it.value && typeof it.value === 'object') {
       const m = {};
       for (const provider of Object.keys(it.value)) {
@@ -167,10 +188,57 @@ router.put('/settings/:key', async (req, res) => {
       };
     }
     value = merged;
+  } else if (key === 'channel_settings') {
+    if (!value || typeof value !== 'object') {
+      return res.status(400).json({ success: false, message: 'value must be object' });
+    }
+    const existing = (await settingsSvc.getSetting('channel_settings', {})) || {};
+    const merged = { ...existing };
+    const VALID_PROVIDERS = ['waha', 'metaCloud'];
+    if (value.provider != null) {
+      if (!VALID_PROVIDERS.includes(value.provider)) {
+        return res.status(400).json({ success: false, message: `provider must be one of: ${VALID_PROVIDERS.join(', ')}` });
+      }
+      merged.provider = value.provider;
+    }
+    const URL_FIELDS = ['inbound_webhook_url', 'outbound_webhook_url', 'status_webhook_url'];
+    for (const f of URL_FIELDS) {
+      if (value[f] != null) {
+        const s = String(value[f]).trim();
+        if (s && !/^https?:\/\//.test(s)) {
+          return res.status(400).json({ success: false, message: `${f} must be http(s) URL` });
+        }
+        merged[f] = s || null;
+      }
+    }
+    const PLAIN_FIELDS = ['meta_phone_number_id', 'meta_waba_id', 'waha_session', 'waha_api_url'];
+    for (const f of PLAIN_FIELDS) {
+      if (value[f] != null) merged[f] = String(value[f]).trim() || null;
+    }
+    for (const f of CHANNEL_SECRET_FIELDS) {
+      if (value[f] != null && String(value[f]).trim()) {
+        merged[f] = String(value[f]).trim();
+      }
+    }
+    value = merged;
   } else if (key === 'ai_mode') {
     if (!['auto', 'copilot'].includes(value)) {
       return res.status(400).json({ success: false, message: "ai_mode must be 'auto' or 'copilot'" });
     }
+  } else if (key === 'menu_access') {
+    // Writing the menu-access matrix is admin-only — /api/admin/* itself only
+    // requires a logged-in staff, so guard here to prevent privilege escalation.
+    if (req.staff?.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'admin only' });
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return res.status(400).json({ success: false, message: 'value must be object {role:[href]}' });
+    }
+    const out = {};
+    for (const role of Object.keys(value)) {
+      if (Array.isArray(value[role])) out[role] = value[role].filter((h) => typeof h === 'string');
+    }
+    value = out;
   }
   await settingsSvc.setSetting(key, value, req.staff.staff_id);
   res.json({ success: true, key, masked: key === 'ai_credentials' ? true : false });
