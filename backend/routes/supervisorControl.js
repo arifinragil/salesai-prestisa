@@ -10,6 +10,8 @@ const { STUCK_GROUP_OF, bucketOfGroup } = require('../services/stuckGroup');
 const S = require('../services/supervisorSubsections');
 const { promiseSql, PROMISE_RE, mapPromiseRow } = require('../services/salesPromise');
 const { expectedCycle } = require('../services/followupHariH');
+const { runTierA } = require('../services/analystReport');
+const { getActiveExamples, formatExamplesBlock, createFromRevision } = require('../services/trainingExamples');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -257,6 +259,163 @@ router.get('/panel', async (req, res, next) => {
       priority: { p1: sumv(p1Items), p1Items, p2: sumv(p2Items), p2Items, p3: sumv(p3Items), p3Items, total: sumv(p1Items) + sumv(p2Items) + sumv(p3Items) },
       generatedAt: new Date().toISOString(),
     });
+  } catch (e) { next(e); }
+});
+
+// ─── diagnoseLead helper ─────────────────────────────────────────────────────
+// Mirrors cron_analyst_tier_a_prewarm.js single-lead path exactly.
+// loadTranscript is not exported from the cron, so it is copied verbatim here.
+const MAX_TRANSCRIPT_MSGS = 80;
+
+async function _loadTranscript(custNumber, businessNumber) {
+  const rows = (await lotus.query(
+    `SELECT direction, body, message_type, received_at, cs_name
+       FROM messages
+      WHERE cust_number = $1 AND business_number = $2
+      ORDER BY received_at ASC NULLS LAST, id ASC
+      LIMIT $3`,
+    [custNumber, businessNumber, MAX_TRANSCRIPT_MSGS]
+  )).rows;
+  return {
+    transcript: rows.map(m => {
+      const who = m.direction === 'inbound' ? 'Customer'
+                : (m.cs_name ? `Operator (${m.cs_name})` : 'Operator');
+      return `${who}: ${(m.body || `[${m.message_type}]`).slice(0, 300)}`;
+    }).join('\n'),
+    msgCount: rows.length,
+    inboundCount: rows.filter(m => m.direction === 'inbound').length,
+  };
+}
+
+async function diagnoseLead(lotus_id) {
+  // 1. Resolve cust_number + business_number for this lotus_id
+  const contactRes = await lotus.query(
+    `SELECT cust_number, business_number FROM contacts WHERE lotus_id = $1 LIMIT 1`,
+    [lotus_id]
+  );
+  if (!contactRes.rows.length) throw new Error(`lotus_id not found: ${lotus_id}`);
+  const { cust_number, business_number } = contactRes.rows[0];
+
+  // 2. Build transcript (same ordering/slicing the cron uses)
+  const { transcript, msgCount, inboundCount } = await _loadTranscript(cust_number, business_number);
+  if (inboundCount < 1) throw new Error(`Not enough inbound messages for lotus_id: ${lotus_id}`);
+
+  // 3. Fetch last-15 revise_ai corrections (same query the cron uses)
+  const corrections = (await pg.query(
+    `SELECT corrected_root_cause AS to, corrected_reason AS reason FROM crm_lead_supervisor_actions
+     WHERE action='revise_ai' AND corrected_root_cause IS NOT NULL ORDER BY created_at DESC LIMIT 15`
+  )).rows;
+
+  // 4. Build examples block
+  const examplesBlock = formatExamplesBlock(await getActiveExamples());
+
+  // 5. Call runTierA
+  const { validated } = await runTierA({
+    transcript, msgCount, inboundCount,
+    geminiKey: process.env.GEMINI_API_KEY,
+    corrections, examplesBlock,
+  });
+
+  // 6. UPSERT validated fields into crm_lotus_state (same column set + ON CONFLICT as cron)
+  await pg.query(
+    `INSERT INTO crm_lotus_state (lotus_id, root_cause_tag,
+        lead_status, funnel_stage_lost, customer_intent, no_response_after,
+        controllability, decision_maker, internal_root_cause_categories,
+        sales_handling, product_solution_fit, confidence_v2, evidence_quote,
+        stuck_group, stuck_issue,
+        analyst_report_generated_at, analyst_report_msg_count, root_cause_tagged_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now(), $16, now())
+     ON CONFLICT (lotus_id) DO UPDATE SET
+        root_cause_tag = EXCLUDED.root_cause_tag,
+        lead_status = EXCLUDED.lead_status,
+        funnel_stage_lost = EXCLUDED.funnel_stage_lost,
+        customer_intent = EXCLUDED.customer_intent,
+        no_response_after = EXCLUDED.no_response_after,
+        controllability = EXCLUDED.controllability,
+        decision_maker = EXCLUDED.decision_maker,
+        internal_root_cause_categories = EXCLUDED.internal_root_cause_categories,
+        sales_handling = EXCLUDED.sales_handling,
+        product_solution_fit = EXCLUDED.product_solution_fit,
+        confidence_v2 = EXCLUDED.confidence_v2,
+        evidence_quote = EXCLUDED.evidence_quote,
+        stuck_group = EXCLUDED.stuck_group,
+        stuck_issue = EXCLUDED.stuck_issue,
+        analyst_report_generated_at = now(),
+        analyst_report_msg_count = EXCLUDED.analyst_report_msg_count,
+        root_cause_tagged_at = now()`,
+    [lotus_id, validated.customer_reason,
+     validated.lead_status, validated.funnel_stage_lost, validated.customer_intent, validated.no_response_after,
+     validated.controllability, validated.decision_maker, validated.internal_root_cause_categories,
+     validated.sales_handling, validated.product_solution_fit, validated.confidence, validated.evidence_quote,
+     validated.stuck_group, validated.stuck_issue,
+     msgCount]
+  );
+
+  return validated;
+}
+
+// ─── POST /:lotus_id/diagnose ────────────────────────────────────────────────
+router.post('/:lotus_id/diagnose', async (req, res, next) => {
+  try { const out = await diagnoseLead(req.params.lotus_id); res.json({ ok: true, diagnosis: out }); }
+  catch (e) { next(e); }
+});
+
+// ─── POST /diagnosis/:lotus_id/review ───────────────────────────────────────
+router.post('/diagnosis/:lotus_id/review', async (req, res, next) => {
+  try {
+    const { lotus_id } = req.params;
+    const { agree_with_ai, revise_category, revise_subtype, revise_note, solved, supervisor_todo, supervisor_outcome } = req.body || {};
+    if (typeof agree_with_ai !== 'boolean' || typeof solved !== 'boolean')
+      return res.status(400).json({ error: 'agree_with_ai and solved required' });
+    if (agree_with_ai === false && !revise_note)
+      return res.status(400).json({ error: 'revise_note required when disagreeing' });
+    const ins = await pg.query(
+      `INSERT INTO crm_lead_supervisor_actions (lotus_id, staff_id, action, note, corrected_root_cause, corrected_reason, final_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [lotus_id, req.staff.staff_id, solved ? 'resolve' : 'ack', supervisor_todo || null,
+       revise_category || null, revise_note || null, supervisor_outcome || null]);
+    await pg.query(
+      `UPDATE crm_lotus_state SET supervisor_agree_with_ai=$2, supervisor_todo=$3, supervisor_solved=$4,
+         supervisor_outcome=$5, supervisor_ack_at=now(), supervisor_ack_by=$6 WHERE lotus_id=$1`,
+      [lotus_id, agree_with_ai, supervisor_todo || null, solved, supervisor_outcome || null, req.staff.staff_id]);
+    let exampleId = null;
+    if (agree_with_ai === false && revise_category && revise_note) {
+      exampleId = await createFromRevision({ action_id: ins.rows[0].id, category: revise_category,
+        subtype: revise_subtype, analysis: revise_note, created_by: req.staff.staff_id });
+    }
+    res.json({ ok: true, action_id: ins.rows[0].id, training_example_id: exampleId });
+  } catch (e) { next(e); }
+});
+
+// ─── POST /:lotus_id/review-no-diagnose ─────────────────────────────────────
+router.post('/:lotus_id/review-no-diagnose', async (req, res, next) => {
+  try {
+    const { lotus_id } = req.params;
+    const { solved, supervisor_todo, revise_category, revise_note, supervisor_outcome } = req.body || {};
+    await pg.query(
+      `UPDATE crm_lotus_state SET root_cause_tag = COALESCE($2, root_cause_tag), stuck_issue = COALESCE($3, stuck_issue),
+         supervisor_todo=$4, supervisor_solved=$5, supervisor_outcome=$6, supervisor_ack_at=now(), supervisor_ack_by=$7,
+         analyst_report_generated_at = COALESCE(analyst_report_generated_at, now()) WHERE lotus_id=$1`,
+      [lotus_id, revise_category || null, revise_note || null, supervisor_todo || null, !!solved, supervisor_outcome || null, req.staff.staff_id]);
+    await pg.query(
+      `INSERT INTO crm_lead_supervisor_actions (lotus_id, staff_id, action, note, corrected_root_cause, corrected_reason, final_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [lotus_id, req.staff.staff_id, solved ? 'resolve' : 'ack', supervisor_todo || null, revise_category || null, revise_note || null, supervisor_outcome || null]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ─── POST /bulk-diagnose ─────────────────────────────────────────────────────
+router.post('/bulk-diagnose', async (req, res, next) => {
+  try {
+    const ids = (req.body?.lotus_ids || []).slice(0, 100);
+    let succeeded = 0, failed = 0; const errors = [];
+    for (const id of ids) {
+      try { await diagnoseLead(id); succeeded++; }
+      catch (e) { failed++; errors.push({ id, error: e.message }); }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    res.json({ processed: ids.length, succeeded, failed, errors });
   } catch (e) { next(e); }
 });
 
