@@ -23,6 +23,33 @@ const { parseRootCauseFromSummary } = require('../services/rootCauseParser');
 const router = express.Router();
 router.use(requireStaff);
 
+// Per-contact access guard. acquisition/retention may only touch a contact whose
+// Lotus sales name (assign_to_user_name, else last outbound cs_name) matches their
+// full_name. admin + acquisition_manager + other roles bypass. Runs automatically
+// for EVERY route that has a :lotus_id param (detail, messages, send, assign, …),
+// mirroring the list-scoping in GET /contacts.
+router.param('lotus_id', async (req, res, next, lotusId) => {
+  try {
+    const role = req.staff?.role;
+    if (role !== 'acquisition' && role !== 'retention') return next();
+    const { rows } = await lotus.query(
+      `SELECT c.assign_to_user_name,
+              (SELECT m.cs_name FROM messages m
+                 WHERE m.cust_number = c.cust_number AND m.direction = 'outbound' AND m.cs_name IS NOT NULL
+                 ORDER BY m.received_at DESC NULLS LAST, m.id DESC LIMIT 1) AS last_cs
+       FROM contacts c WHERE c.lotus_id = $1`,
+      [lotusId]
+    );
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'not found' });
+    const owner = String(rows[0].assign_to_user_name || rows[0].last_cs || '').trim().toLowerCase();
+    const mine = String(req.staff.full_name || '').trim().toLowerCase();
+    if (!mine || owner !== mine) {
+      return res.status(403).json({ success: false, message: 'forbidden — chat bukan milik Anda' });
+    }
+    next();
+  } catch (e) { next(e); }
+});
+
 // ── helpers ────────────────────────────────────────────────────────────────
 async function getStateMap(lotusIds) {
   if (!lotusIds.length) return new Map();
