@@ -66,6 +66,10 @@ export default function SupervisorControl() {
   const isAdmin = me.data?.user?.role === 'admin';
 
   const [scope, setScope] = useState('team');
+  // business number multi-select filter (array of business_number strings; empty = all)
+  const [bizFilter, setBizFilter] = useState([]);
+  const [bizOpen, setBizOpen] = useState(false);
+  const bizList = useSWR(isAdmin ? '/api/supervisor-control/businesses' : null, fetcher);
   // forceOpen: keyed by group id string, boolean
   const [forceOpen, setForceOpen] = useState({});
   // reviewing: lotus_id currently open in ReviewForm
@@ -75,8 +79,9 @@ export default function SupervisorControl() {
   // bulk diagnose loading state
   const [bulkLoading, setBulkLoading] = useState(false);
 
+  const bizParam = bizFilter.length ? `&business=${encodeURIComponent(bizFilter.join(','))}` : '';
   const url = isAdmin
-    ? `/api/supervisor-control/panel?scope=${scope === 'mine' ? 'mine' : 'team'}`
+    ? `/api/supervisor-control/panel?scope=${scope === 'mine' ? 'mine' : 'team'}${bizParam}`
     : null;
   const { data, mutate, error } = useSWR(url, fetcher, { refreshInterval: 60_000 });
 
@@ -133,7 +138,43 @@ export default function SupervisorControl() {
         {/* Scope toggle + refresh */}
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold text-slate-800">Supervisor Control Panel</h1>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 items-center">
+            {/* Business number multi-select filter */}
+            <div className="relative">
+              <button
+                onClick={() => setBizOpen((v) => !v)}
+                className={`px-2 py-1 rounded text-xs border ${bizFilter.length ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-100 text-slate-600 border-slate-200'}`}
+              >
+                No. Bisnis{bizFilter.length ? ` (${bizFilter.length})` : ''} ▾
+              </button>
+              {bizOpen && (
+                <div className="absolute right-0 z-20 mt-1 w-64 max-h-72 overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+                  <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-slate-100">
+                    <span className="text-xs font-semibold text-slate-700">Filter No. Bisnis</span>
+                    {bizFilter.length > 0 && (
+                      <button onClick={() => setBizFilter([])} className="text-xs text-violet-600 hover:underline">Reset</button>
+                    )}
+                  </div>
+                  {(bizList.data?.items || []).map((b) => {
+                    const checked = bizFilter.includes(b.business_number);
+                    return (
+                      <label key={b.business_number} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-slate-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setBizFilter((prev) =>
+                            checked ? prev.filter((n) => n !== b.business_number) : [...prev, b.business_number]
+                          )}
+                        />
+                        <span className="text-xs text-slate-700 font-mono">{b.business_number}</span>
+                        <span className="text-[10px] text-slate-400 ml-auto">{b.recent_count}</span>
+                      </label>
+                    );
+                  })}
+                  {!bizList.data && <div className="text-xs text-slate-400 px-1 py-2">Memuat…</div>}
+                </div>
+              )}
+            </div>
             <button onClick={() => setScope('team')} className={`px-2 py-1 rounded text-xs ${scope === 'team' ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Tim</button>
             <button onClick={() => setScope('mine')} className={`px-2 py-1 rounded text-xs ${scope === 'mine' ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Saya</button>
             <button onClick={() => mutate()} className="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">↻</button>

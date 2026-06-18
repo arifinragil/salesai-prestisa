@@ -77,15 +77,38 @@ const PRICE_RE = /harga|berapa|price|brp/i;
 const REACTION_RE = /belum disupport oleh lotus \((reaction|sticker)\)/i;
 
 // GET /panel — lead aktif dalam scope, dirakit jadi priority queue + 3 grup.
+// GET /businesses — distinct business (WA) numbers for the multi-select filter,
+// recent-active first. Just the raw numbers; no brand labels.
+router.get('/businesses', async (req, res, next) => {
+  try {
+    const { rows } = await lotus.query(
+      `SELECT business_number,
+              COUNT(*) FILTER (WHERE GREATEST(last_message_at, last_inbound_at) >= now() - interval '3 days') AS recent_count
+         FROM contacts
+        WHERE business_number IS NOT NULL AND business_number <> ''
+        GROUP BY business_number
+       HAVING COUNT(*) FILTER (WHERE GREATEST(last_message_at, last_inbound_at) >= now() - interval '3 days') > 0
+        ORDER BY recent_count DESC`
+    );
+    res.json({ items: rows.map(r => ({ business_number: r.business_number, recent_count: Number(r.recent_count) })) });
+  } catch (e) { next(e); }
+});
+
 router.get('/panel', async (req, res, next) => {
   try {
     const scope = req.query.scope;
+    // business: optional comma-separated list of business_numbers to filter by.
+    const businesses = String(req.query.business || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const bizFilter = businesses.length ? `AND c.business_number = ANY($1::text[])` : '';
+    const bizParams = businesses.length ? [businesses] : [];
     const { rows: contacts } = await lotus.query(
       `WITH recent AS (
          SELECT c.lotus_id, c.cust_number, c.cust_name, c.business_number, c.assign_to_user_name,
                 c.last_message, c.last_message_from, c.last_message_at, c.last_inbound_at
          FROM contacts c
          WHERE GREATEST(c.last_message_at, c.last_inbound_at) >= now() - interval '3 days'
+         ${bizFilter}
          ORDER BY GREATEST(c.last_message_at, c.last_inbound_at) DESC NULLS LAST
          LIMIT 1000
        )
@@ -118,7 +141,8 @@ router.get('/panel', async (req, res, next) => {
          WHERE m.cust_number=r.cust_number AND m.direction='inbound') lia ON true
        LEFT JOIN LATERAL (SELECT array_agg(m.received_at ORDER BY m.received_at) AS fu FROM messages m
          WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.cs_id IS NOT NULL
-           AND m.received_at::date = now()::date) fud ON true`
+           AND m.received_at::date = now()::date) fud ON true`,
+      bizParams
     );
     const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
     const now = new Date();
