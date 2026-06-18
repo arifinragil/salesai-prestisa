@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import useSWR from 'swr';
 import Layout from '@/components/Layout';
 import { useUser } from '@/lib/useUser';
-import { api } from '@/lib/api';
+import { api, fetcher } from '@/lib/api';
 import { navItems, CONFIGURABLE_ROLES } from '@/lib/menuCatalog';
 
 const ROLE_LABEL = {
@@ -9,7 +10,9 @@ const ROLE_LABEL = {
   viewer: 'Viewer',
   acquisition: 'Acquisition',
   retention: 'Retention',
+  staff: 'Staff (legacy)',
 };
+const labelFor = (role) => ROLE_LABEL[role] || (role.charAt(0).toUpperCase() + role.slice(1));
 
 // Effective default for a role with no saved matrix: the legacy fallback
 // (everything that is not adminOnly).
@@ -21,6 +24,11 @@ export default function MenuAccessPage() {
   const { user, isLoading, mutate } = useUser({ redirectTo: '/login' });
   const isAdmin = user?.role === 'admin';
 
+  // Configurable roles come from the backend (Authentik mapping ∪ DB roles, minus
+  // admin), so the editor tracks Authentik and never misses a legacy role.
+  const { data: rolesData } = useSWR(isAdmin ? '/api/admin/roles' : null, fetcher);
+  const roles = rolesData?.roles?.length ? rolesData.roles : CONFIGURABLE_ROLES;
+
   // matrix: { role: Set(href) }
   const [matrix, setMatrix] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -30,11 +38,11 @@ export default function MenuAccessPage() {
     if (!user) return;
     const saved = user.menu_access || {};
     const next = {};
-    for (const role of CONFIGURABLE_ROLES) {
+    for (const role of roles) {
       next[role] = new Set(Array.isArray(saved[role]) ? saved[role] : defaultHrefs());
     }
     setMatrix(next);
-  }, [user]);
+  }, [user, rolesData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(role, href) {
     setMatrix((prev) => {
@@ -52,7 +60,7 @@ export default function MenuAccessPage() {
     setSaving(true); setMsg('');
     try {
       const value = {};
-      for (const role of CONFIGURABLE_ROLES) value[role] = Array.from(matrix[role]);
+      for (const role of roles) value[role] = Array.from(matrix[role] || []);
       await api('/api/admin/settings/menu_access', { method: 'PUT', body: { value } });
       await mutate();
       setMsg('Tersimpan. Menu user lain ikut berubah saat mereka refresh.');
@@ -82,9 +90,9 @@ export default function MenuAccessPage() {
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="text-left px-3 py-2 font-semibold text-slate-600">Menu</th>
-                {CONFIGURABLE_ROLES.map((role) => (
+                {roles.map((role) => (
                   <th key={role} className="px-3 py-2 text-center font-semibold text-slate-600 whitespace-nowrap">
-                    <div>{ROLE_LABEL[role] || role}</div>
+                    <div>{labelFor(role)}</div>
                     <div className="mt-1 flex items-center justify-center gap-1 text-[10px] font-normal">
                       <button onClick={() => setAll(role, true)} className="text-brand-600 hover:underline">semua</button>
                       <span className="text-slate-300">/</span>
@@ -102,12 +110,12 @@ export default function MenuAccessPage() {
                     <span className="text-slate-700">{it.label}</span>
                     <span className="text-slate-400 text-xs ml-1.5">{it.href}</span>
                   </td>
-                  {CONFIGURABLE_ROLES.map((role) => (
+                  {roles.map((role) => (
                     <td key={role} className="px-3 py-2 text-center">
                       <input
                         type="checkbox"
                         className="w-4 h-4 cursor-pointer accent-brand-600"
-                        checked={matrix[role].has(it.href)}
+                        checked={!!(matrix[role] && matrix[role].has(it.href))}
                         onChange={() => toggle(role, it.href)}
                       />
                     </td>

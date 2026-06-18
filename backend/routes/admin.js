@@ -1,6 +1,6 @@
 const express = require('express');
 const pg = require('../db/postgres');
-const { requireStaff } = require('../middleware/auth');
+const { requireStaff, AUTHENTIK_GROUP_ROLE_MAP, DEFAULT_ROLE_FROM_AUTHENTIK } = require('../middleware/auth');
 const settingsSvc = require('../services/settings');
 const costGuard = require('../services/costGuard');
 const aiClient = require('../services/aiClient');
@@ -242,6 +242,21 @@ router.put('/settings/:key', async (req, res) => {
   }
   await settingsSvc.setSetting(key, value, req.staff.staff_id);
   res.json({ success: true, key, masked: key === 'ai_credentials' ? true : false });
+});
+
+// Configurable (non-admin) roles for the menu-access editor. Sourced from the
+// Authentik group→role mapping (so it tracks Authentik) UNION roles that actually
+// exist in staff_users (so legacy roles like 'staff' aren't missed). 'admin' is
+// excluded — admin always sees every menu.
+router.get('/roles', async (req, res) => {
+  if (req.staff?.role !== 'admin') return res.status(403).json({ success: false, message: 'admin only' });
+  const fromAuthentik = AUTHENTIK_GROUP_ROLE_MAP.map(([, role]) => role);
+  const { rows } = await pg.query(`SELECT DISTINCT role FROM staff_users WHERE role IS NOT NULL AND role <> ''`);
+  const dbRoles = rows.map((r) => r.role);
+  const roles = [...new Set([...fromAuthentik, DEFAULT_ROLE_FROM_AUTHENTIK, ...dbRoles])]
+    .filter((r) => r && r !== 'admin')
+    .sort();
+  res.json({ success: true, roles });
 });
 
 router.get('/settings/audit', async (_req, res) => {
