@@ -1,0 +1,2 @@
+-- 039_role_locked.sql
+ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS role_locked BOOLEAN NOT NULL DEFAULT FALSE;

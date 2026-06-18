@@ -70,7 +70,7 @@ router.get('/online', async (_req, res) => {
 
 router.get('/', requireAdmin, async (_req, res) => {
   const { rows } = await pg.query(
-    `SELECT id, username, full_name, role, active, last_login_at, last_seen_at, disabled_at, created_at
+    `SELECT id, username, full_name, role, role_locked, active, last_login_at, last_seen_at, disabled_at, created_at
      FROM staff_users ORDER BY id`
   );
   res.json({ success: true, items: rows });
@@ -100,16 +100,18 @@ router.post('/', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ success: false, message: 'invalid id' });
-  const { full_name, role, active } = req.body || {};
+  const { full_name, role, active, role_locked } = req.body || {};
   if (role && !VALID_ROLES.includes(role)) return res.status(400).json({ success: false, message: 'role must be one of: ' + VALID_ROLES.join('|') });
   await pg.query(
     `UPDATE staff_users SET
        full_name = COALESCE($2, full_name),
        role = COALESCE($3, role),
        active = COALESCE($4, active),
-       disabled_at = CASE WHEN $4 = FALSE THEN now() ELSE disabled_at END
+       disabled_at = CASE WHEN $4 = FALSE THEN now() ELSE disabled_at END,
+       role_locked = COALESCE($5, role_locked)
      WHERE id = $1`,
-    [id, full_name ?? null, role ?? null, typeof active === 'boolean' ? active : null]
+    [id, full_name ?? null, role ?? null, typeof active === 'boolean' ? active : null,
+     typeof role_locked === 'boolean' ? role_locked : null]
   );
   res.json({ success: true });
 });
