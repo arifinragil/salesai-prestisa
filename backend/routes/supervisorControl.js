@@ -100,9 +100,10 @@ router.get('/panel', async (req, res, next) => {
               COALESCE(lib.len,0) AS last_in_len,
               gh.last_out_human AS last_out_human_at,
               lia.last_in_at AS last_in_at,
-              fud.fu AS fu_times_today
+              fud.fu AS fu_times_today,
+              lm.body AS last_msg_body
        FROM recent r
-       LEFT JOIN LATERAL (SELECT received_at, direction FROM messages m WHERE m.cust_number=r.cust_number ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lm ON true
+       LEFT JOIN LATERAL (SELECT received_at, direction, body FROM messages m WHERE m.cust_number=r.cust_number ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lm ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fim ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lo ON true
        LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fo ON true
@@ -134,7 +135,7 @@ router.get('/panel', async (req, res, next) => {
       const fu = followupState({ first_inbound_at: firstInbound, last_outbound_at: c.last_outbound_at }, now);
       const hoursSinceH = (ts) => ts ? (now.getTime() - new Date(ts).getTime()) / 3600000 : null;
       const lastInAfterOut = c.last_in_at && (!c.last_out_human_at || new Date(c.last_in_at) > new Date(c.last_out_human_at));
-      const lastInIsReaction = lastInAfterOut && REACTION_RE.test(String(c.last_message || ''));
+      const lastInIsReaction = lastInAfterOut && REACTION_RE.test(String(c.last_msg_body || ''));
       const ghostHours = (c.last_out_human_at && (!c.last_in_at || new Date(c.last_in_at) < new Date(c.last_out_human_at)))
         ? hoursSinceH(c.last_out_human_at) : null;
       const expCycle = expectedCycle({ first_inbound_at: firstInbound, fu_times: c.fu_times_today || [] }, now);
