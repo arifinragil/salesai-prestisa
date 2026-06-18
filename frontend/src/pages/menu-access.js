@@ -14,6 +14,15 @@ const ROLE_LABEL = {
 };
 const labelFor = (role) => ROLE_LABEL[role] || (role.charAt(0).toUpperCase() + role.slice(1));
 
+// Where the role comes from in Authentik (shown under the column label).
+function hintFor(meta) {
+  if (!meta) return '';
+  if (meta.groups && meta.groups.length) return `Authentik: ${meta.groups.join(' / ')}`;
+  if (meta.default) return 'default (tanpa group)';
+  if (meta.legacy) return 'legacy (bukan dari Authentik)';
+  return '';
+}
+
 // Effective default for a role with no saved matrix: the legacy fallback
 // (everything that is not adminOnly).
 function defaultHrefs() {
@@ -28,6 +37,7 @@ export default function MenuAccessPage() {
   // admin), so the editor tracks Authentik and never misses a legacy role.
   const { data: rolesData } = useSWR(isAdmin ? '/api/admin/roles' : null, fetcher);
   const roles = rolesData?.roles?.length ? rolesData.roles : CONFIGURABLE_ROLES;
+  const metaByRole = Object.fromEntries((rolesData?.roleMeta || []).map((m) => [m.role, m]));
 
   // matrix: { role: Set(href) }
   const [matrix, setMatrix] = useState(null);
@@ -93,6 +103,9 @@ export default function MenuAccessPage() {
                 {roles.map((role) => (
                   <th key={role} className="px-3 py-2 text-center font-semibold text-slate-600 whitespace-nowrap">
                     <div>{labelFor(role)}</div>
+                    {hintFor(metaByRole[role]) && (
+                      <div className="text-[10px] font-normal text-slate-400">{hintFor(metaByRole[role])}</div>
+                    )}
                     <div className="mt-1 flex items-center justify-center gap-1 text-[10px] font-normal">
                       <button onClick={() => setAll(role, true)} className="text-brand-600 hover:underline">semua</button>
                       <span className="text-slate-300">/</span>

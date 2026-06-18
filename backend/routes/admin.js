@@ -256,7 +256,18 @@ router.get('/roles', async (req, res) => {
   const roles = [...new Set([...fromAuthentik, DEFAULT_ROLE_FROM_AUTHENTIK, ...dbRoles])]
     .filter((r) => r && r !== 'admin')
     .sort();
-  res.json({ success: true, roles });
+  // Reverse map role → Authentik group(s), so the editor can show where each role
+  // comes from (e.g. operator ← cs). Roles with no group are either the default
+  // fallback (viewer) or legacy DB values (e.g. staff).
+  const groupsByRole = {};
+  for (const [g, role] of AUTHENTIK_GROUP_ROLE_MAP) (groupsByRole[role] ||= []).push(g);
+  const roleMeta = roles.map((role) => ({
+    role,
+    groups: groupsByRole[role] || [],
+    default: role === DEFAULT_ROLE_FROM_AUTHENTIK,
+    legacy: !groupsByRole[role] && role !== DEFAULT_ROLE_FROM_AUTHENTIK,
+  }));
+  res.json({ success: true, roles, roleMeta });
 });
 
 router.get('/settings/audit', async (_req, res) => {
