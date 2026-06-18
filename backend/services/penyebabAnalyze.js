@@ -158,7 +158,7 @@ async function analyzeLead(lotus_id) {
     systemInstruction: STRUCTURED_ANALYSIS_INSTRUCTION,
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 1200,
+      maxOutputTokens: 4096,
       responseMimeType: 'application/json',
       thinkingConfig: { thinkingBudget: 0 },
     },
