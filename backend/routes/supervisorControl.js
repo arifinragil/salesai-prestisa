@@ -12,7 +12,7 @@ const { promiseSql, PROMISE_RE, mapPromiseRow } = require('../services/salesProm
 const { expectedCycle } = require('../services/followupHariH');
 const { runTierA } = require('../services/analystReport');
 const { getActiveExamples, formatExamplesBlock, createFromRevision } = require('../services/trainingExamples');
-const { summarize } = require('../services/supervisorRecap');
+const { summarize, matchRate, issueBreakdown } = require('../services/supervisorRecap');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -444,6 +444,52 @@ router.get('/actions', async (req, res, next) => {
     }
     const bySupervisor = Object.values(bySup).map((b) => ({ ...b, compliance_pct: b.handled ? Math.round((b.done/b.handled)*100) : 0 }));
     res.json({ summary: { ...summary, range_days: (dateFrom&&dateTo)?undefined:range, date_from: dateFrom, date_to: dateTo }, bySupervisor, tasks: leads.slice(0, 500) });
+  } catch (e) { next(e); }
+});
+
+// ─── GET /daily-recap ────────────────────────────────────────────────────────
+router.get('/daily-recap', async (req, res, next) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const { rows: leads } = await pg.query(
+      `SELECT s.lotus_id, s.stuck_group, s.supervisor_agree_with_ai, s.supervisor_ack_at, s.supervisor_solved,
+              s.supervisor_outcome, s.supervisor_ack_by, su.full_name AS supervisor_name
+       FROM crm_lotus_state s LEFT JOIN staff_users su ON su.id = s.supervisor_ack_by
+       WHERE s.supervisor_ack_at::date = $1 OR s.analyst_report_generated_at::date = $1`, [date]);
+    const withBucket = leads.map((l) => ({ ...l, stuck_bucket: l.stuck_group ? bucketOfGroup(l.stuck_group) : null }));
+    const issue = issueBreakdown(withBucket);
+    const match = matchRate(leads);
+    const { rows: actions } = await pg.query(
+      `SELECT a.lotus_id, a.staff_id, a.action, a.note, a.final_status, a.created_at, su.full_name AS supervisor_name
+       FROM crm_lead_supervisor_actions a LEFT JOIN staff_users su ON su.id = a.staff_id
+       WHERE a.created_at::date = $1 ORDER BY a.created_at DESC LIMIT 200`, [date]);
+    const bySupMap = {};
+    for (const a of actions) {
+      const k = a.staff_id;
+      bySupMap[k] = bySupMap[k] || { supervisor_id: k, supervisor_name: a.supervisor_name, total: 0, solved: 0, in_progress: 0, actions_sample: [] };
+      bySupMap[k].total++;
+      if (a.action === 'resolve') bySupMap[k].solved++; else bySupMap[k].in_progress++;
+      if (bySupMap[k].actions_sample.length < 3) bySupMap[k].actions_sample.push({ lotus_id: a.lotus_id, note: a.note });
+    }
+    const bubble = { total: 0, closing: 0, fu_done: 0, sales_replied: 0, lost: 0, no_action: 0 };
+    for (const l of leads) {
+      bubble.total++;
+      switch (l.supervisor_outcome) {
+        case 'closing': bubble.closing++; break;
+        case 'still_fu': bubble.fu_done++; break;
+        case 'lost': bubble.lost++; break;
+        case 'parked': bubble.sales_replied++; break;
+        default: bubble.no_action++;
+      }
+    }
+    res.json({
+      date,
+      issueBreakdown: { byCategory: issue.byCategory, total: issue.total, aiQuality: match },
+      matchRate: match,
+      actions,
+      bySupervisor: Object.values(bySupMap),
+      bubbleProgress: { summary: bubble },
+    });
   } catch (e) { next(e); }
 });
 
