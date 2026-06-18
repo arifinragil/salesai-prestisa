@@ -19,4 +19,8 @@ describe('supervisorSubsections', () => {
     expect(S.isBubbleChat({ inbound_count: 1, last_in_len: 20, awaiting_customer_reply_min: 90 })).toBe(true);
     expect(S.isBubbleChat({ inbound_count: 3, last_in_len: 20, awaiting_customer_reply_min: 90 })).toBe(false);
   });
+  test('customerWaiting excludes reaction/sticker last bubble', () => {
+    expect(S.isCustomerWaiting({ awaiting_sales_reply_min: 22, last_in_after_out: true, last_in_is_reaction: true })).toBe(false);
+    expect(S.isCustomerWaiting({ awaiting_sales_reply_min: 22, last_in_after_out: true, last_in_is_reaction: false })).toBe(true);
+  });
 });

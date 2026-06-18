@@ -74,6 +74,7 @@ router.get('/lead/:lotus_id/actions', async (req, res, next) => {
 });
 
 const PRICE_RE = /harga|berapa|price|brp/i;
+const REACTION_RE = /belum disupport oleh lotus \((reaction|sticker)\)/i;
 
 // GET /panel — lead aktif dalam scope, dirakit jadi priority queue + 3 grup.
 router.get('/panel', async (req, res, next) => {
@@ -133,6 +134,7 @@ router.get('/panel', async (req, res, next) => {
       const fu = followupState({ first_inbound_at: firstInbound, last_outbound_at: c.last_outbound_at }, now);
       const hoursSinceH = (ts) => ts ? (now.getTime() - new Date(ts).getTime()) / 3600000 : null;
       const lastInAfterOut = c.last_in_at && (!c.last_out_human_at || new Date(c.last_in_at) > new Date(c.last_out_human_at));
+      const lastInIsReaction = lastInAfterOut && REACTION_RE.test(String(c.last_message || ''));
       const ghostHours = (c.last_out_human_at && (!c.last_in_at || new Date(c.last_in_at) < new Date(c.last_out_human_at)))
         ? hoursSinceH(c.last_out_human_at) : null;
       const expCycle = expectedCycle({ first_inbound_at: firstInbound, fu_times: c.fu_times_today || [] }, now);
@@ -170,6 +172,7 @@ router.get('/panel', async (req, res, next) => {
         // New sub-section fields
         last_in_len: Number(c.last_in_len) || 0,
         last_in_after_out: lastInAfterOut,
+        last_in_is_reaction: lastInIsReaction,
         ghost_hours: ghostHours,
         expected_cycle: expCycle,
         no_reply_yet: lead.never_responded && !!c.first_inbound_at,

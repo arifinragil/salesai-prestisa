@@ -2,7 +2,7 @@
 // Pure sub-section classifiers for Supervisor Control Group 1 & 2.
 
 function isCustomerWaiting(lead) {
-  return !!lead.last_in_after_out && (lead.awaiting_sales_reply_min || 0) > 10;
+  return !!lead.last_in_after_out && (lead.awaiting_sales_reply_min || 0) > 10 && !lead.last_in_is_reaction;
 }
 // 'p1' (no reply yet), 'p3' (slow but replied), or null (fast enough).
 function slowFirstResponse(lead) {
