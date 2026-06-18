@@ -10,6 +10,9 @@ const AUTHENTIK_GROUP_ROLE_MAP = [
   ['it',           'admin'],
   ['finance',      'admin'],
   ['cs',           'operator'],
+  // 'acquisition manager' must come BEFORE 'acquisition': a manager is usually in
+  // both groups, and mapRole returns the first match.
+  ['acquisition manager', 'acquisition_manager'],
   ['acquisition',  'acquisition'],
   ['retention',    'retention'],
 ];

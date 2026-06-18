@@ -9,6 +9,7 @@ const ROLE_LABEL = {
   operator: 'Operator (CS)',
   viewer: 'Viewer',
   acquisition: 'Acquisition',
+  acquisition_manager: 'Acquisition Manager',
   retention: 'Retention',
   staff: 'Staff (legacy)',
 };
