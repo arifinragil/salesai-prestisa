@@ -57,29 +57,26 @@ async function findCandidates() {
 
   if (!contacts.length) return [];
 
-  // Check inbound message counts in lotus
-  const custPairs = contacts.map(c => [c.cust_number, c.business_number]);
-  // Build filter: (cust_number, business_number) IN (...)
-  const values = custPairs.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
-  const flatPairs = custPairs.flat();
-
+  // Count inbound messages per cust_number. NOTE: contacts.lotus_id and
+  // messages.lotus_id are DIFFERENT id spaces and do not join — cust_number is
+  // the only reliable link. cust_number = ANY(...) uses messages_cust_received_idx;
+  // the previous (cust_number, business_number) tuple IN defeated the index and
+  // forced a full scan of the 2.7M-row messages table.
+  const custNumbers = [...new Set(contacts.map(c => c.cust_number).filter(Boolean))];
   const inboundCounts = (await lotusPg.query(`
-    SELECT cust_number, business_number, COUNT(*) AS cnt
+    SELECT cust_number, COUNT(*) AS cnt
       FROM messages
      WHERE direction = 'inbound'
-       AND (cust_number, business_number) IN (${values})
-     GROUP BY cust_number, business_number
-  `, flatPairs)).rows;
+       AND cust_number = ANY($1::text[])
+     GROUP BY cust_number
+  `, [custNumbers])).rows;
 
   const inboundMap = new Map(
-    inboundCounts.map(r => [`${r.cust_number}|${r.business_number}`, parseInt(r.cnt, 10)])
+    inboundCounts.map(r => [r.cust_number, parseInt(r.cnt, 10)])
   );
 
   // Filter contacts with enough inbound messages
-  const qualified = contacts.filter(c => {
-    const cnt = inboundMap.get(`${c.cust_number}|${c.business_number}`) ?? 0;
-    return cnt >= MIN_INBOUND;
-  });
+  const qualified = contacts.filter(c => (inboundMap.get(c.cust_number) ?? 0) >= MIN_INBOUND);
 
   if (!qualified.length) return [];
 
