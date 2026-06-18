@@ -76,6 +76,7 @@ export default function UsersPage() {
                 <option value="admin">admin</option>
                 <option value="operator">operator</option>
                 <option value="acquisition">acquisition</option>
+                <option value="acquisition_manager">acquisition manager</option>
                 <option value="retention">retention</option>
                 <option value="viewer">viewer</option>
               </select>
@@ -114,7 +115,7 @@ export default function UsersPage() {
                       {isEditing
                         ? <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}
                             className="text-xs px-1 py-0.5 border border-slate-200 rounded">
-                            <option value="admin">admin</option><option value="operator">operator</option><option value="acquisition">acquisition</option><option value="retention">retention</option><option value="viewer">viewer</option>
+                            <option value="admin">admin</option><option value="operator">operator</option><option value="acquisition">acquisition</option><option value="acquisition_manager">acquisition manager</option><option value="retention">retention</option><option value="viewer">viewer</option>
                           </select>
                         : <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">{u.role}</span>}
                     </td>
