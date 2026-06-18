@@ -142,6 +142,42 @@ describe('POST /diagnosis/:id/review', () => {
   });
 });
 
+describe('POST /training-examples', () => {
+  test('400 when case_pattern missing', async () => {
+    const res = await request(appWith(ADMIN))
+      .post('/api/supervisor-control/training-examples')
+      .send({ category: 'sales_handling', analysis: 'some analysis' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/case_pattern/i);
+  });
+
+  test('400 when category missing', async () => {
+    const res = await request(appWith(ADMIN))
+      .post('/api/supervisor-control/training-examples')
+      .send({ case_pattern: 'customer asks price then ghosts', analysis: 'some analysis' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/category/i);
+  });
+
+  test('400 when analysis missing', async () => {
+    const res = await request(appWith(ADMIN))
+      .post('/api/supervisor-control/training-examples')
+      .send({ case_pattern: 'customer asks price then ghosts', category: 'sales_handling' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/analysis/i);
+  });
+
+  test('200 with id when all required fields provided', async () => {
+    pg.query.mockResolvedValueOnce({ rows: [{ id: 1 }] });
+    const res = await request(appWith(ADMIN))
+      .post('/api/supervisor-control/training-examples')
+      .send({ case_pattern: 'customer asks price then ghosts', category: 'sales_handling', analysis: 'sales did not follow up' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.id).toBe(1);
+  });
+});
+
 describe('Route registration smoke test', () => {
   test('/bulk-diagnose and /review-no-diagnose routes are registered', async () => {
     // We just need to confirm these routes exist (don't call Gemini).

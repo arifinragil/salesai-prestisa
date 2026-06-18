@@ -419,4 +419,48 @@ router.post('/bulk-diagnose', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Training-examples CRUD ──────────────────────────────────────────────────
+router.get('/training-examples', async (req, res, next) => {
+  try {
+    const active = req.query.active;
+    const where = active === 'true' ? 'WHERE active=TRUE' : active === 'false' ? 'WHERE active=FALSE' : '';
+    const { rows } = await pg.query(
+      `SELECT t.*, su.full_name AS created_by_name FROM crm_ai_training_examples t
+       LEFT JOIN staff_users su ON su.id=t.created_by ${where} ORDER BY t.updated_at DESC LIMIT 200`);
+    const stats = await pg.query(
+      `SELECT COUNT(*) FILTER (WHERE active) AS active_count,
+              COUNT(*) FILTER (WHERE source='supervisor_revise') AS from_revise,
+              COUNT(*) FILTER (WHERE source='manual_entry') AS from_manual,
+              COALESCE(SUM(usage_count),0) AS total_usage FROM crm_ai_training_examples`);
+    res.json({ items: rows, stats: stats.rows[0] });
+  } catch (e) { next(e); }
+});
+router.post('/training-examples', async (req, res, next) => {
+  try {
+    const { case_pattern, category, subtype, analysis, suggested_action, suggested_script } = req.body || {};
+    if (!case_pattern || !category || !analysis) return res.status(400).json({ error: 'case_pattern, category, analysis required' });
+    const { rows } = await pg.query(
+      `INSERT INTO crm_ai_training_examples (case_pattern, category, subtype, analysis, suggested_action, suggested_script, source, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,'manual_entry',$7) RETURNING id`,
+      [case_pattern, category, subtype || null, analysis, suggested_action || null, suggested_script || null, req.staff.staff_id]);
+    res.json({ ok: true, id: rows[0].id });
+  } catch (e) { next(e); }
+});
+router.put('/training-examples/:id', async (req, res, next) => {
+  try {
+    const f = req.body || {};
+    await pg.query(
+      `UPDATE crm_ai_training_examples SET case_pattern=COALESCE($2,case_pattern), category=COALESCE($3,category),
+         subtype=$4, analysis=COALESCE($5,analysis), suggested_action=$6, suggested_script=$7,
+         active=COALESCE($8,active), updated_at=now() WHERE id=$1`,
+      [req.params.id, f.case_pattern||null, f.category||null, f.subtype||null, f.analysis||null,
+       f.suggested_action||null, f.suggested_script||null, typeof f.active==='boolean'?f.active:null]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+router.delete('/training-examples/:id', async (req, res, next) => {
+  try { await pg.query(`UPDATE crm_ai_training_examples SET active=FALSE, updated_at=now() WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { next(e); }
+});
+
 module.exports = router;
