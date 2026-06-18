@@ -14,3 +14,9 @@ test('tanpa corrections tidak ada blok koreksi', () => {
   const p = buildTierAUserPrompt({ transcript: 'x', msgCount: 5, inboundCount: 4 });
   expect(p).not.toMatch(/KOREKSI SUPERVISOR/i);
 });
+test('buildTierAUserPrompt embeds examples block when provided', () => {
+  const { buildTierAUserPrompt } = require('../services/analystReport');
+  const out = buildTierAUserPrompt({ transcript: 't', msgCount: 1, inboundCount: 1,
+    corrections: [], examplesBlock: '\nCONTOH KASUS: xyz\n' });
+  expect(out).toContain('CONTOH KASUS: xyz');
+});

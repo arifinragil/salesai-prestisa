@@ -8,7 +8,7 @@ Output WAJIB JSON valid sesuai schema. Tidak boleh ada teks lain di luar JSON.
 Diagnosis berbasis bukti chat. Tidak boleh mengarang. Kalau ragu, set confidence='low'.
 Pisahkan jelas Customer Reason (alasan permukaan customer) vs Internal Root Cause (akar masalah yang tim bisa fix).`;
 
-function buildTierAUserPrompt({ transcript, msgCount, inboundCount, corrections }) {
+function buildTierAUserPrompt({ transcript, msgCount, inboundCount, corrections, examplesBlock = '' }) {
   const corrBlock = Array.isArray(corrections) && corrections.length
     ? `\nKOREKSI SUPERVISOR DARI LAPANGAN (pelajari pola ini saat menilai):\n` +
       corrections.slice(0, 15).map((c) => `- root cause sebenarnya: ${c.to}${c.reason ? ` (alasan: ${c.reason})` : ''}`).join('\n') + '\n'
@@ -68,12 +68,12 @@ Output JSON saja, tidak ada teks lain:
   "stuck_issue": "<frasa pendek>" | null,
   "evidence_quote": "<quote max 100 char>"
 }
-${corrBlock}
+${corrBlock}${examplesBlock}
 Transkrip (${msgCount} pesan, ${inboundCount} inbound):
 ${transcript}`;
 }
 
-async function runTierA({ transcript, msgCount, inboundCount, geminiKey, corrections }) {
+async function runTierA({ transcript, msgCount, inboundCount, geminiKey, corrections, examplesBlock }) {
   const genAI = new GoogleGenerativeAI(geminiKey);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
@@ -85,7 +85,7 @@ async function runTierA({ transcript, msgCount, inboundCount, geminiKey, correct
       thinkingConfig: { thinkingBudget: 0 },
     },
   });
-  const prompt = buildTierAUserPrompt({ transcript, msgCount, inboundCount, corrections });
+  const prompt = buildTierAUserPrompt({ transcript, msgCount, inboundCount, corrections, examplesBlock });
   const t0 = Date.now();
   let r;
   try { r = await model.generateContent(prompt); }
