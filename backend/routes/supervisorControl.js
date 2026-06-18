@@ -187,7 +187,7 @@ router.get('/panel', async (req, res, next) => {
         if (!groups.includes('lead_stuck')) groups = [...groups, 'lead_stuck'];
       }
       items.push({
-        lotus_id: c.lotus_id, cust_name: c.cust_name, pic_name: c.assign_to_user_name || null,
+        lotus_id: c.lotus_id, cust_name: c.cust_name, cust_number: c.cust_number, pic_name: c.assign_to_user_name || null,
         lead_in_at: firstInbound, last_message: c.last_message,
         last_message_from: c.last_message_from, last_message_at: c.last_message_at,
         awaiting_min: lead.awaiting_sales_reply_min ?? lead.awaiting_customer_reply_min, status: lead.status,

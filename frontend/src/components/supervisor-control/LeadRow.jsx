@@ -26,6 +26,16 @@ export default function LeadRow({ lead, variant = 'stuck', onReview, onReviewDx,
           {lead.pic_name && <span className="text-sm text-slate-400">· {lead.pic_name}</span>}
           <span className="sm:hidden ml-auto"><Badge variant={variant} lead={lead} /></span>
         </div>
+        {lead.cust_number && (
+          <button
+            type="button"
+            title="Salin no. telp customer"
+            onClick={() => (onCopy ? onCopy(lead.cust_number) : navigator.clipboard?.writeText(lead.cust_number))}
+            className="mt-1 inline-flex items-center gap-1 text-xs font-mono text-slate-600 bg-slate-100 hover:bg-slate-200 rounded px-2 py-0.5"
+          >
+            📞 {lead.cust_number} <span className="text-slate-400">⧉</span>
+          </button>
+        )}
         {variant === 'promise' && lead.promise_body && (
           <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded px-2 py-1 mt-1">"{lead.promise_body}"</p>
         )}

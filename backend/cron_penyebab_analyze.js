@@ -48,11 +48,15 @@ async function findCandidates() {
 
   const lotusIds = stateRows.map(r => r.lotus_id);
 
-  // Get cust_number + business_number from lotus contacts
+  // Get cust_number + business_number from lotus contacts.
+  // Exclude "random chat" (label = 'RANDOM LEADS') — not real sales leads, so
+  // they don't belong in the "belum closing" analysis. (Actual closings are
+  // excluded later via the POS order match.)
   const contacts = (await lotusPg.query(`
     SELECT lotus_id, cust_number, business_number
       FROM contacts
      WHERE lotus_id = ANY($1::text[])
+       AND COALESCE(label, '') <> 'RANDOM LEADS'
   `, [lotusIds])).rows;
 
   if (!contacts.length) return [];
