@@ -185,8 +185,19 @@ router.get('/contacts', async (req, res) => {
 
     if (effStatus && it.status !== effStatus) return false;
 
-    // Scoping per-user: non-admin hanya lead miliknya; admin default semua (toggle 'mine').
-    if (!isAdmin || scope === 'mine') {
+    // Scoping per-user:
+    // - acquisition / retention: hanya chat yang nama sales Lotus-nya = full_name user
+    //   (match assign_to_user_name ATAU cs_name terakhir, lewat lotus_assign_to).
+    // - admin & acquisition_manager: lihat semua (admin bisa toggle scope=mine).
+    // - non-admin lain (operator/viewer/staff): hanya lead miliknya (assigned_staff_id).
+    const role = req.staff?.role;
+    if (role === 'acquisition' || role === 'retention') {
+      const mine = String(req.staff.full_name || '').trim().toLowerCase();
+      const owner = String(it.lotus_assign_to || '').trim().toLowerCase();
+      if (!mine || owner !== mine) return false;
+    } else if (isAdmin || role === 'acquisition_manager') {
+      if (scope === 'mine' && it.assigned_staff_id !== req.staff.staff_id) return false;
+    } else {
       if (it.assigned_staff_id !== req.staff.staff_id) return false;
     }
     // Filter queue lama tetap didukung
