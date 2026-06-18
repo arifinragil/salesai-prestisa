@@ -78,6 +78,7 @@ app.use('/api/customer-issues', customerIssuesRoutes);
 app.use('/api/tax-requests', require('./routes/taxRequests'));
 app.use('/api/lotus-inbox', require('./routes/lotusInbox'));
 app.use('/api/qna', require('./routes/qna'));
+app.use('/api/penyebab', require('./routes/penyebab'));
 app.use('/webhook', webhookRoutes);
 app.use('/webhook/vonage', require('./routes/vonageWebhook'));
 app.use(healthRoutes);
