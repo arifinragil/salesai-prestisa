@@ -120,4 +120,4 @@ async function requireStaff(req, res, next) {
   }
 }
 
-module.exports = { COOKIE_NAME, signToken, setAuthCookie, clearAuthCookie, readToken, verifyToken, requireStaff, mapRole };
+module.exports = { COOKIE_NAME, signToken, setAuthCookie, clearAuthCookie, readToken, verifyToken, requireStaff, mapRole, AUTHENTIK_GROUP_ROLE_MAP, DEFAULT_ROLE_FROM_AUTHENTIK };
