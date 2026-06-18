@@ -12,6 +12,7 @@ const { promiseSql, PROMISE_RE, mapPromiseRow } = require('../services/salesProm
 const { expectedCycle } = require('../services/followupHariH');
 const { runTierA } = require('../services/analystReport');
 const { getActiveExamples, formatExamplesBlock, createFromRevision } = require('../services/trainingExamples');
+const { summarize } = require('../services/supervisorRecap');
 
 const router = express.Router();
 router.use(requireStaff);
@@ -416,6 +417,33 @@ router.post('/bulk-diagnose', async (req, res, next) => {
       await new Promise((r) => setTimeout(r, 200));
     }
     res.json({ processed: ids.length, succeeded, failed, errors });
+  } catch (e) { next(e); }
+});
+
+// ─── GET /actions (compliance backlog) ──────────────────────────────────────
+router.get('/actions', async (req, res, next) => {
+  try {
+    const range = parseInt(req.query.range) || 30;
+    const dateFrom = req.query.date_from, dateTo = req.query.date_to;
+    const where = (dateFrom && dateTo)
+      ? `WHERE s.updated_at >= $1 AND s.updated_at < ($2::date + 1)`
+      : `WHERE s.updated_at >= now() - ($1 || ' days')::interval`;
+    const params = (dateFrom && dateTo) ? [dateFrom, dateTo] : [String(range)];
+    const { rows: leads } = await pg.query(
+      `SELECT s.lotus_id, s.supervisor_solved, s.supervisor_ack_at, s.supervisor_ack_by, s.root_cause_tag, s.stuck_group, s.assigned_staff_id,
+              su.full_name AS supervisor_name
+       FROM crm_lotus_state s LEFT JOIN staff_users su ON su.id=s.supervisor_ack_by
+       ${where} AND (s.stuck_group IS NOT NULL OR s.supervisor_ack_at IS NOT NULL)
+       ORDER BY s.supervisor_ack_at DESC NULLS LAST LIMIT 500`, params);
+    const summary = summarize(leads);
+    const bySup = {};
+    for (const l of leads.filter((x) => x.supervisor_ack_by)) {
+      const k = l.supervisor_ack_by;
+      bySup[k] = bySup[k] || { supervisor_id: k, supervisor_name: l.supervisor_name, handled: 0, done: 0, open: 0 };
+      bySup[k].handled++; l.supervisor_solved ? bySup[k].done++ : bySup[k].open++;
+    }
+    const bySupervisor = Object.values(bySup).map((b) => ({ ...b, compliance_pct: b.handled ? Math.round((b.done/b.handled)*100) : 0 }));
+    res.json({ summary: { ...summary, range_days: (dateFrom&&dateTo)?undefined:range, date_from: dateFrom, date_to: dateTo }, bySupervisor, tasks: leads.slice(0, 500) });
   } catch (e) { next(e); }
 });
 
