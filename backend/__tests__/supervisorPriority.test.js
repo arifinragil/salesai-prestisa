@@ -10,8 +10,10 @@ describe('priority', () => {
     const r = classify(base({ never_responded: true }));
     expect(r.priority).toBe('P1'); expect(r.groups).toContain('sales_response_risk');
   });
-  test('customer nunggu >10 mnt → P1', () => {
+  test('customer nunggu ≥ 2 mnt → P1', () => {
     expect(classify(base({ awaiting_sales_reply_min: 18 })).priority).toBe('P1');
+    expect(classify(base({ awaiting_sales_reply_min: 2 })).priority).toBe('P1');   // boundary
+    expect(classify(base({ awaiting_sales_reply_min: 1 })).priority).not.toBe('P1'); // under threshold
   });
   test('customer diam >60 mnt → P2 + follow_up', () => {
     const r = classify(base({ awaiting_customer_reply_min: 120 }));

@@ -43,7 +43,7 @@ function classify(lead) {
   if (acrActionable || lead.fu_status === 'overdue' || lead.single_bubble) groups.push('follow_up');
   if (stuck) groups.push('lead_stuck');
 
-  const p1 = lead.never_responded || (asr != null && asr > 10) || (asked && asr != null);
+  const p1 = lead.never_responded || (asr != null && asr >= 2) || (asked && asr != null);
   const p2 = acrActionable || fuIncomplete || ((hot || (score != null && score >= HIGH_SCORE)) && stuck);
   const p3 = lead.single_bubble || inquiry || groups.length > 0;
 

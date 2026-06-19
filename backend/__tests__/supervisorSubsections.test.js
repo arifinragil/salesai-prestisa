@@ -1,9 +1,12 @@
 const S = require('../services/supervisorSubsections');
 
 describe('supervisorSubsections', () => {
-  test('customerWaiting: customer waited > 10 min', () => {
+  test('customerWaiting: customer waited ≥ 2 min', () => {
     expect(S.isCustomerWaiting({ awaiting_sales_reply_min: 22, last_in_after_out: true })).toBe(true);
-    expect(S.isCustomerWaiting({ awaiting_sales_reply_min: 5, last_in_after_out: true })).toBe(false);
+    expect(S.isCustomerWaiting({ awaiting_sales_reply_min: 2, last_in_after_out: true })).toBe(true);   // boundary
+    expect(S.isCustomerWaiting({ awaiting_sales_reply_min: 1, last_in_after_out: true })).toBe(false);  // under threshold
+    // sales already replied → last msg is outbound → awaiting null → not waiting (regardless of last_in_after_out)
+    expect(S.isCustomerWaiting({ awaiting_sales_reply_min: null, last_in_after_out: true })).toBe(false);
   });
   test('slowFirstResponse split by no_reply_yet', () => {
     expect(S.slowFirstResponse({ first_response_lag_min: null, no_reply_yet: true })).toBe('p1');

@@ -76,6 +76,25 @@ router.get('/lead/:lotus_id/actions', async (req, res, next) => {
 const PRICE_RE = /harga|berapa|price|brp/i;
 const REACTION_RE = /belum disupport oleh lotus \((reaction|sticker)\)/i;
 
+// Outbound rows from the legacy lotus-tailer store a naive (no-TZ) receivedAt that
+// Postgres reads 7h early under Asia/Jakarta. Re-interpret it as UTC at read time so
+// a sales reply sorts correctly against the customer's inbound (mirrors lotusInbox
+// EFF_RECV). Without this, a real reply lands 7h in the past → last_out_human_at stays
+// behind last_in_at → the lead never leaves "Customer Menunggu Balas". Inbound carries
+// a 'Z' and is untouched by the CASE.
+const EFF_RECV = `(CASE
+      WHEN m.direction = 'outbound'
+       AND (m.raw_doc->>'receivedAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?$'
+      THEN ((m.raw_doc->>'receivedAt')||'Z')::timestamptz
+      ELSE m.received_at END)`;
+// Second-precision bot/HSM outbound in the same second as its trigger inbound would
+// otherwise sort before it; bump to .999 so the customer message stays "latest".
+const ORD_TS = `(CASE
+      WHEN m.direction = 'outbound'
+       AND (extract(milliseconds from ${EFF_RECV})::int % 1000) = 0
+      THEN ${EFF_RECV} + interval '999 milliseconds'
+      ELSE ${EFF_RECV} END)`;
+
 // GET /panel — lead aktif dalam scope, dirakit jadi priority queue + 3 grup.
 // GET /businesses — distinct business (WA) numbers for the multi-select filter,
 // recent-active first. Just the raw numbers; no brand labels.
@@ -126,22 +145,22 @@ router.get('/panel', async (req, res, next) => {
               lia.last_in_at AS last_in_at,
               fud.fu AS fu_times_today
        FROM recent r
-       LEFT JOIN LATERAL (SELECT received_at, direction FROM messages m WHERE m.cust_number=r.cust_number ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lm ON true
-       LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fim ON true
-       LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at DESC NULLS LAST, id DESC LIMIT 1) lo ON true
-       LEFT JOIN LATERAL (SELECT received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY received_at ASC NULLS LAST, id ASC LIMIT 1) fo ON true
+       LEFT JOIN LATERAL (SELECT ${EFF_RECV} AS received_at, m.direction FROM messages m WHERE m.cust_number=r.cust_number ORDER BY ${ORD_TS} DESC NULLS LAST, id DESC LIMIT 1) lm ON true
+       LEFT JOIN LATERAL (SELECT m.received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound' ORDER BY m.received_at ASC NULLS LAST, id ASC LIMIT 1) fim ON true
+       LEFT JOIN LATERAL (SELECT ${EFF_RECV} AS received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY ${EFF_RECV} DESC NULLS LAST, id DESC LIMIT 1) lo ON true
+       LEFT JOIN LATERAL (SELECT ${EFF_RECV} AS received_at FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' ORDER BY ${EFF_RECV} ASC NULLS LAST, id ASC LIMIT 1) fo ON true
        LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='inbound') ic ON true
-       LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.received_at::date = now()::date) ft ON true
+       LEFT JOIN LATERAL (SELECT COUNT(*) n FROM messages m WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND ${EFF_RECV}::date = now()::date) ft ON true
        LEFT JOIN LATERAL (SELECT length(COALESCE(m.body,'')) AS len, m.body AS body FROM messages m
          WHERE m.cust_number=r.cust_number AND m.direction='inbound'
          ORDER BY m.received_at DESC NULLS LAST, id DESC LIMIT 1) lib ON true
-       LEFT JOIN LATERAL (SELECT MAX(m.received_at) AS last_out_human FROM messages m
+       LEFT JOIN LATERAL (SELECT MAX(${EFF_RECV}) AS last_out_human FROM messages m
          WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.cs_id IS NOT NULL) gh ON true
        LEFT JOIN LATERAL (SELECT MAX(m.received_at) AS last_in_at FROM messages m
          WHERE m.cust_number=r.cust_number AND m.direction='inbound') lia ON true
-       LEFT JOIN LATERAL (SELECT array_agg(m.received_at ORDER BY m.received_at) AS fu FROM messages m
+       LEFT JOIN LATERAL (SELECT array_agg(${EFF_RECV} ORDER BY ${EFF_RECV}) AS fu FROM messages m
          WHERE m.cust_number=r.cust_number AND m.direction='outbound' AND m.cs_id IS NOT NULL
-           AND m.received_at::date = now()::date) fud ON true`,
+           AND ${EFF_RECV}::date = now()::date) fud ON true`,
       bizParams
     );
     const stateMap = await getStateMap(contacts.map((c) => c.lotus_id));
