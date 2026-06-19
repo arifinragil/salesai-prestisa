@@ -5,6 +5,11 @@ const nextConfig = {
   // No rewrites needed: Caddy proxies /api/* /webhook/* /admin/* /socket.io/* directly
   // to the backend, and everything else hits Next.js.
   poweredByHeader: false,
+  async redirects() {
+    return [
+      { source: '/conversations/:id', destination: '/lotus-inbox/:id', permanent: false },
+    ];
+  },
 };
 
 module.exports = nextConfig;

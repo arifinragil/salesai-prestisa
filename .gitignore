@@ -13,3 +13,7 @@ uploads/
 # Screenshot tooling node_modules
 scripts/screenshots/node_modules
 scripts/screenshots/package-lock.json
+.gstack/
+*.pid
+.claude/
+img/

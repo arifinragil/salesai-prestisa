@@ -23,6 +23,44 @@ const { parseRootCauseFromSummary } = require('../services/rootCauseParser');
 const router = express.Router();
 router.use(requireStaff);
 
+// Lotus-inbox scope resolver. Returns the set of Lotus sales names this user
+// is allowed to read chats for. Result shape:
+//   { all: true }                   → bypass scoping (admin/manager OR explicit '*' in lotus_sales_names)
+//   { names: ['nameA', 'nameB'] }   → restrict to these (lowercased) names
+//   { names: [] }                   → no access (no full_name & no explicit names)
+// Cached on req to avoid duplicate DB reads.
+async function getLotusScope(req) {
+  if (req.__lotusScope) return req.__lotusScope;
+  const role = req.staff?.role;
+  if (role === 'admin' || role === 'acquisition_manager') {
+    return (req.__lotusScope = { all: true });
+  }
+  let fullName = req.staff?.full_name || null;
+  let salesNames = req.staff?.lotus_sales_names || null;
+  if (fullName === null || salesNames === null) {
+    const { rows } = await pg.query(
+      `SELECT full_name, lotus_sales_names FROM staff_users WHERE id = $1`,
+      [req.staff.staff_id]
+    );
+    fullName = rows[0]?.full_name || null;
+    salesNames = rows[0]?.lotus_sales_names || null;
+    req.staff.full_name = fullName;
+    req.staff.lotus_sales_names = salesNames;
+  }
+  const explicit = Array.isArray(salesNames) ? salesNames : null;
+  if (explicit && explicit.includes('*')) {
+    return (req.__lotusScope = { all: true });
+  }
+  if (explicit && explicit.length > 0) {
+    const names = explicit.map((n) => String(n).trim().toLowerCase()).filter(Boolean);
+    return (req.__lotusScope = { all: false, names });
+  }
+  if (fullName) {
+    return (req.__lotusScope = { all: false, names: [String(fullName).trim().toLowerCase()] });
+  }
+  return (req.__lotusScope = { all: false, names: [] });
+}
+
 // Per-contact access guard. acquisition/retention may only touch a contact whose
 // Lotus sales name (assign_to_user_name, else last outbound cs_name) matches their
 // full_name. admin + acquisition_manager + other roles bypass. Runs automatically
@@ -30,6 +68,9 @@ router.use(requireStaff);
 // mirroring the list-scoping in GET /contacts.
 router.param('lotus_id', async (req, res, next, lotusId) => {
   try {
+    const scope = await getLotusScope(req);
+    if (scope.all) return next();
+    // Only enforce for acquisition / retention. Other non-bypass roles fall through.
     const role = req.staff?.role;
     if (role !== 'acquisition' && role !== 'retention') return next();
     const { rows } = await lotus.query(
@@ -42,8 +83,7 @@ router.param('lotus_id', async (req, res, next, lotusId) => {
     );
     if (!rows[0]) return res.status(404).json({ success: false, message: 'not found' });
     const owner = String(rows[0].assign_to_user_name || rows[0].last_cs || '').trim().toLowerCase();
-    const mine = String(req.staff.full_name || '').trim().toLowerCase();
-    if (!mine || owner !== mine) {
+    if (!owner || !scope.names.includes(owner)) {
       return res.status(403).json({ success: false, message: 'forbidden — chat bukan milik Anda' });
     }
     next();
@@ -204,26 +244,30 @@ router.get('/contacts', async (req, res) => {
       first_response_at: s.first_response_at || null,
       handover_count: s.handover_count ?? 0,
     };
-  }).filter((it) => {
+  });
+
+  const scopeInfo = await getLotusScope(req);
+  const filtered = items.filter((it) => {
     const isAdmin = req.staff?.role === 'admin';
-    const scope = req.query.scope; // 'mine' | 'team' (admin saja); non-admin selalu 'mine'
+    const scopeQ = req.query.scope; // 'mine' | 'team' (admin saja); non-admin selalu 'mine'
     const tab = req.query.tab;
     const effStatus = req.query.status || (tab ? 'active' : null);
 
     if (effStatus && it.status !== effStatus) return false;
 
     // Scoping per-user:
-    // - acquisition / retention: hanya chat yang nama sales Lotus-nya = full_name user
-    //   (match assign_to_user_name ATAU cs_name terakhir, lewat lotus_assign_to).
-    // - admin & acquisition_manager: lihat semua (admin bisa toggle scope=mine).
+    // - admin / acquisition_manager OR lotus_sales_names contains '*' → see all
+    //   (admin bisa toggle scope=mine).
+    // - acquisition / retention: chat yang nama sales Lotus-nya ada di scope.names
+    //   (override via staff_users.lotus_sales_names, fallback full_name).
     // - non-admin lain (operator/viewer/staff): hanya lead miliknya (assigned_staff_id).
     const role = req.staff?.role;
-    if (role === 'acquisition' || role === 'retention') {
-      const mine = String(req.staff.full_name || '').trim().toLowerCase();
+    if (scopeInfo.all) {
+      if ((isAdmin || role === 'acquisition_manager') && scopeQ === 'mine'
+          && it.assigned_staff_id !== req.staff.staff_id) return false;
+    } else if (role === 'acquisition' || role === 'retention') {
       const owner = String(it.lotus_assign_to || '').trim().toLowerCase();
-      if (!mine || owner !== mine) return false;
-    } else if (isAdmin || role === 'acquisition_manager') {
-      if (scope === 'mine' && it.assigned_staff_id !== req.staff.staff_id) return false;
+      if (!owner || !scopeInfo.names.includes(owner)) return false;
     } else {
       if (it.assigned_staff_id !== req.staff.staff_id) return false;
     }
@@ -242,7 +286,7 @@ router.get('/contacts', async (req, res) => {
     return true;
   });
 
-  res.json({ success: true, items, count: items.length, limit, offset });
+  res.json({ success: true, items: filtered, count: filtered.length, limit, offset });
 });
 
 // ── tab-counts: jumlah lead per tab Kanban dalam scope user ───────────────────

@@ -175,22 +175,41 @@ router.get('/feedback/recent', async (req, res) => {
 router.get('/reply-templates', async (req, res) => {
   const includeDisabled = req.query.all === 'true';
   const { rows } = await pg.query(
-    `SELECT id, shortcut, title, body, category, enabled, created_at, updated_at
+    `SELECT id, shortcut, title, body, category, enabled,
+            case_label, case_pattern, intent_match,
+            created_at, updated_at
      FROM crm_reply_templates ${includeDisabled ? '' : 'WHERE enabled = TRUE'}
      ORDER BY category NULLS LAST, shortcut`
   );
   res.json({ success: true, items: rows });
 });
 
+// Validate regex compiles in PG (uses ~* semantics). Returns null on success, error string on fail.
+async function validatePgRegex(pattern) {
+  if (!pattern) return null;
+  try {
+    await pg.query(`SELECT 'x' ~* $1`, [pattern]);
+    return null;
+  } catch (e) {
+    return e.message;
+  }
+}
+
 router.post('/reply-templates', async (req, res) => {
-  const { shortcut, title, body, category } = req.body || {};
+  const { shortcut, title, body, category, case_label, case_pattern, intent_match } = req.body || {};
   if (!shortcut || !title || !body) return res.status(400).json({ success: false, message: 'shortcut, title, body required' });
   if (!/^[a-z0-9_-]{2,32}$/.test(shortcut)) return res.status(400).json({ success: false, message: 'shortcut must be 2-32 [a-z0-9_-]' });
+  if (case_pattern) {
+    const rxErr = await validatePgRegex(case_pattern);
+    if (rxErr) return res.status(400).json({ success: false, message: `case_pattern invalid: ${rxErr}` });
+  }
   try {
     const r = await pg.query(
-      `INSERT INTO crm_reply_templates (shortcut, title, body, category, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [shortcut, title.slice(0, 120), body, category || null, req.staff.staff_id]
+      `INSERT INTO crm_reply_templates
+         (shortcut, title, body, category, created_by, case_label, case_pattern, intent_match)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [shortcut, title.slice(0, 120), body, category || null, req.staff.staff_id,
+       case_label || null, case_pattern || null, intent_match || null]
     );
     res.json({ success: true, id: r.rows[0].id });
   } catch (err) {
@@ -201,16 +220,30 @@ router.post('/reply-templates', async (req, res) => {
 
 router.put('/reply-templates/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { shortcut, title, body, category, enabled } = req.body || {};
-  await pg.query(
-    `UPDATE crm_reply_templates SET
-       shortcut = COALESCE($2, shortcut), title = COALESCE($3, title),
-       body = COALESCE($4, body), category = COALESCE($5, category),
-       enabled = COALESCE($6, enabled), updated_at = now()
-     WHERE id = $1`,
-    [id, shortcut || null, title || null, body || null, category ?? null,
-     enabled === undefined ? null : enabled]
-  );
+  const b = req.body || {};
+  if (b.case_pattern) {
+    const rxErr = await validatePgRegex(b.case_pattern);
+    if (rxErr) return res.status(400).json({ success: false, message: `case_pattern invalid: ${rxErr}` });
+  }
+  // Dynamic SET so empty string "" clears the column (vs COALESCE which would skip).
+  const sets = []; const vals = []; let i = 1;
+  function add(col, key, normalizer = (v) => v) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return;
+    let v = b[key];
+    v = (v === '' || v === undefined) ? null : normalizer(v);
+    vals.push(v); sets.push(`${col} = $${++i}`);
+  }
+  add('shortcut', 'shortcut');
+  add('title', 'title');
+  add('body', 'body');
+  add('category', 'category');
+  add('enabled', 'enabled', (v) => !!v);
+  add('case_label', 'case_label');
+  add('case_pattern', 'case_pattern');
+  add('intent_match', 'intent_match');
+  if (!sets.length) return res.json({ success: true, skipped: true });
+  sets.push('updated_at = now()');
+  await pg.query(`UPDATE crm_reply_templates SET ${sets.join(', ')} WHERE id = $1`, [id, ...vals]);
   res.json({ success: true });
 });
 

@@ -5,6 +5,8 @@ if (provider === 'waha') {
   adapter = require('./waAdapters/wahaAdapter');
 } else if (provider === 'metaCloud') {
   adapter = require('./waAdapters/metaCloudAdapter');
+} else if (provider === 'vonage') {
+  adapter = require('./waAdapters/vonageAdapter');
 } else {
   throw new Error(`unknown WA_PROVIDER: ${provider}`);
 }
@@ -26,4 +28,5 @@ module.exports = {
   setProfileName:    (opts) => adapter.setProfileName    ? adapter.setProfileName(opts)    : Promise.reject(new Error('not supported')),
   setProfileStatus:  (opts) => adapter.setProfileStatus  ? adapter.setProfileStatus(opts)  : Promise.reject(new Error('not supported')),
   setProfilePicture: (opts) => adapter.setProfilePicture ? adapter.setProfilePicture(opts) : Promise.reject(new Error('not supported')),
+  sendTemplate: (opts) => adapter.sendTemplate ? adapter.sendTemplate(opts) : Promise.reject(new Error('template not supported')),
 };

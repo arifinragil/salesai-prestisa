@@ -9,10 +9,12 @@ export default function UsersPage() {
   const toast = useToast();
   const list = useSWR('/api/users', fetcher);
   const me = useSWR('/api/auth/me', fetcher);
+  const salesOpts = useSWR('/api/lotus-inbox/sales-options', fetcher);
   const [draft, setDraft] = useState({ username: '', password: '', full_name: '', role: 'operator' });
-  const [editing, setEditing] = useState(null); // {id, full_name, role, active}
+  const [editing, setEditing] = useState(null); // {id, full_name, role, active, lotus_sales_names}
   const [resetFor, setResetFor] = useState(null);
   const [newPw, setNewPw] = useState('');
+  const [salesPickerFor, setSalesPickerFor] = useState(null); // user id currently editing names
 
   async function create() {
     if (!draft.username || !draft.password) return toast.error('username + password wajib');
@@ -28,10 +30,25 @@ export default function UsersPage() {
     try {
       await api(`/api/users/${u.id}`, {
         method: 'PUT',
-        body: { full_name: u.full_name, role: u.role, active: u.active, role_locked: u.role_locked },
+        body: {
+          full_name: u.full_name, role: u.role, active: u.active, role_locked: u.role_locked,
+          lotus_sales_names: Array.isArray(u.lotus_sales_names) ? u.lotus_sales_names : undefined,
+        },
       });
       toast.success('Disimpan');
       setEditing(null);
+      list.mutate();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function saveSalesNames(userId, names) {
+    try {
+      await api(`/api/users/${userId}`, {
+        method: 'PUT',
+        body: { lotus_sales_names: names },
+      });
+      toast.success('Akses sales diperbarui');
+      setSalesPickerFor(null);
       list.mutate();
     } catch (e) { toast.error(e.message); }
   }
@@ -92,6 +109,7 @@ export default function UsersPage() {
               <tr>
                 <th className="px-3 py-2 text-left">User</th>
                 <th className="px-3 py-2 text-left">Role</th>
+                <th className="px-3 py-2 text-left">Akses Sales (Lotus)</th>
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Online</th>
                 <th className="px-3 py-2 text-left">Last login</th>
@@ -128,6 +146,17 @@ export default function UsersPage() {
                             <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">{u.role}</span>
                             {u.role_locked && <span title="Role dikunci — Authentik tidak akan menimpa">🔒</span>}
                           </div>}
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      <SalesNamesCell
+                        user={u}
+                        isAdmin={isAdmin}
+                        open={salesPickerFor === u.id}
+                        onOpen={() => setSalesPickerFor(u.id)}
+                        onClose={() => setSalesPickerFor(null)}
+                        salesOptions={salesOpts.data?.items || []}
+                        onSave={(names) => saveSalesNames(u.id, names)}
+                      />
                     </td>
                     <td className="px-3 py-2">
                       {isEditing
@@ -174,6 +203,102 @@ export default function UsersPage() {
         </div>
       </div>
     </Layout>
+  );
+}
+
+function SalesNamesCell({ user, isAdmin, open, onOpen, onClose, salesOptions, onSave }) {
+  const current = Array.isArray(user.lotus_sales_names) ? user.lotus_sales_names : null;
+  const isAll = current?.includes('*');
+  const fallback = !current || current.length === 0;
+
+  // Local draft set
+  const [draft, setDraft] = useState(() => new Set(current || []));
+  // Reset draft each time the picker re-opens for this user
+  if (open && draft.__forUser !== user.id) {
+    const s = new Set(current || []);
+    s.__forUser = user.id;
+    setDraft(s);
+  }
+
+  function toggle(name) {
+    const s = new Set(draft);
+    if (name === '*') {
+      // Toggle ALL: clears individuals; selecting '*' alone means see all
+      if (s.has('*')) s.delete('*'); else { s.clear(); s.add('*'); }
+    } else {
+      s.delete('*'); // selecting a specific name disables ALL
+      if (s.has(name)) s.delete(name); else s.add(name);
+    }
+    s.__forUser = user.id;
+    setDraft(s);
+  }
+
+  function commit() {
+    const names = Array.from(draft).filter((x) => x !== undefined);
+    onSave(names);
+  }
+
+  function clearAll() {
+    const s = new Set(); s.__forUser = user.id;
+    setDraft(s);
+    onSave([]); // empty → fallback to full_name
+  }
+
+  // Display
+  if (!open) {
+    return (
+      <div className="flex items-start gap-1 flex-wrap">
+        {isAll && <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Semua sales</span>}
+        {!isAll && fallback && (
+          <span className="text-xs text-slate-400" title={`Default: match full_name = ${user.full_name || '—'}`}>
+            (default: {user.full_name || '—'})
+          </span>
+        )}
+        {!isAll && !fallback && current.map((n) => (
+          <span key={n} className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">{n}</span>
+        ))}
+        {isAdmin && (
+          <button onClick={onOpen}
+            className="text-xs text-brand-600 hover:underline ml-1">Edit</button>
+        )}
+      </div>
+    );
+  }
+
+  // Editor
+  return (
+    <div className="border border-slate-200 rounded-md p-2 bg-slate-50 min-w-[18rem]">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-slate-600">Pilih sales (multi)</span>
+        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">×</button>
+      </div>
+      <label className="flex items-center gap-2 text-xs mb-1 cursor-pointer">
+        <input type="checkbox" checked={draft.has('*')} onChange={() => toggle('*')} />
+        <span className="font-medium text-emerald-700">All (semua sales)</span>
+      </label>
+      <div className="max-h-48 overflow-y-auto border-t border-slate-200 pt-1 mt-1 space-y-0.5">
+        {salesOptions.map((o) => (
+          <label key={o.name} className={`flex items-center gap-2 text-xs cursor-pointer px-1 py-0.5 rounded ${draft.has('*') ? 'opacity-40' : 'hover:bg-white'}`}>
+            <input type="checkbox" disabled={draft.has('*')}
+              checked={draft.has(o.name)} onChange={() => toggle(o.name)} />
+            <span className="flex-1">{o.name}</span>
+            <span className="text-[10px] text-slate-400">{o.n}</span>
+          </label>
+        ))}
+        {salesOptions.length === 0 && <div className="text-xs text-slate-400">memuat…</div>}
+      </div>
+      <div className="flex justify-between gap-1 mt-2 pt-2 border-t border-slate-200">
+        <button onClick={clearAll}
+          className="text-xs px-2 py-1 rounded text-slate-500 hover:bg-slate-100"
+          title="Hapus override → kembali ke default (match full_name)">
+          Reset default
+        </button>
+        <div className="flex gap-1">
+          <button onClick={onClose} className="text-xs px-2 py-1 rounded text-slate-500">Batal</button>
+          <button onClick={commit} className="text-xs px-2 py-1 rounded bg-brand-500 text-white hover:bg-brand-600">Simpan</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

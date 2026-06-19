@@ -401,14 +401,14 @@ export default function CustomerPanel({ convId }) {
 
   if (isLoading) {
     return (
-      <aside className="w-72 shrink-0 border-l border-slate-200 bg-slate-50 p-4">
+      <aside className="w-72 shrink-0 border-l border-slate-200 bg-slate-50 p-4 h-full overflow-y-auto">
         <div className="text-xs text-slate-400">Loading…</div>
       </aside>
     );
   }
   if (error) {
     return (
-      <aside className="w-72 shrink-0 border-l border-slate-200 bg-slate-50 p-4">
+      <aside className="w-72 shrink-0 border-l border-slate-200 bg-slate-50 p-4 h-full overflow-y-auto">
         <div className="text-xs text-rose-600">{error.message || 'Gagal memuat'}</div>
       </aside>
     );
@@ -418,7 +418,7 @@ export default function CustomerPanel({ convId }) {
   const c = data?.conversation || {};
 
   return (
-    <aside className="w-72 shrink-0 border-l border-slate-200 bg-slate-50 overflow-y-auto">
+    <aside className="w-72 shrink-0 border-l border-slate-200 bg-slate-50 overflow-y-auto h-full">
       <div className="p-4 space-y-4">
         <section>
           <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
@@ -520,6 +520,27 @@ export default function CustomerPanel({ convId }) {
             </div>
           </div>
         </section>
+
+        {c.ai_summary && (
+          <section>
+            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+              <span>Ringkasan AI</span>
+              {c.ai_summary_generated_at && (
+                <span className="font-normal text-slate-400 normal-case tracking-normal" title={new Date(c.ai_summary_generated_at).toLocaleString('id-ID')}>
+                  {formatRelative(c.ai_summary_generated_at)}
+                </span>
+              )}
+            </div>
+            <div className="bg-purple-50 border border-purple-200 rounded-md p-3">
+              <div className="text-xs text-purple-900 whitespace-pre-wrap">{c.ai_summary}</div>
+              {c.ai_summary_msg_count != null && (
+                <div className="text-[10px] text-purple-500 mt-2">
+                  Dari {c.ai_summary_msg_count} pesan · {new Date(c.ai_summary_generated_at).toLocaleString('id-ID')}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         <NotesBlock convId={convId} toast={toast} />
         <TagsBlock convId={convId} toast={toast} />

@@ -65,9 +65,9 @@ async function provisionFromAuthentik(req) {
   const role = mapRole(groups);
 
   // Lookup by authentik_uid first (stable), then by username (legacy)
-  let r = await pg.query(`SELECT id, username, role, active, role_locked FROM staff_users WHERE authentik_uid = $1 LIMIT 1`, [uid]);
+  let r = await pg.query(`SELECT id, username, full_name, role, active, role_locked, lotus_sales_names FROM staff_users WHERE authentik_uid = $1 LIMIT 1`, [uid]);
   if (!r.rows[0]) {
-    r = await pg.query(`SELECT id, username, role, active, role_locked FROM staff_users WHERE username = $1 LIMIT 1`, [username]);
+    r = await pg.query(`SELECT id, username, full_name, role, active, role_locked, lotus_sales_names FROM staff_users WHERE username = $1 LIMIT 1`, [username]);
   }
 
   if (r.rows[0]) {
@@ -82,7 +82,11 @@ async function provisionFromAuthentik(req) {
        WHERE id = $1`,
       [u.id, effectiveRole, uid, fullName || '']
     );
-    return { staff_id: u.id, username, role: effectiveRole };
+    return {
+      staff_id: u.id, username, role: effectiveRole,
+      full_name: fullName || u.full_name || null,
+      lotus_sales_names: u.lotus_sales_names || null,
+    };
   }
 
   // New user — auto-create with placeholder password (Authentik handles auth)
@@ -94,7 +98,7 @@ async function provisionFromAuthentik(req) {
      RETURNING id`,
     [username, fullName || username, role, uid]
   );
-  return { staff_id: ins.rows[0].id, username, role };
+  return { staff_id: ins.rows[0].id, username, role, full_name: fullName || username, lotus_sales_names: null };
 }
 
 // Auth gate. Authentik headers take priority over local JWT cookie.
